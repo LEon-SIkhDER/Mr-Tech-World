@@ -1,7 +1,31 @@
+"use client"
 import Image from 'next/image';
 import React from 'react';
+import toast from 'react-hot-toast';
+import { authClient } from '../lib/auth-client';
+import { useRouter } from 'next/navigation';
 
 const SignUp = () => {
+    const router = useRouter()
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        // Handle form submission logic here
+        const formData = Object.fromEntries(new FormData(e.target));
+        console.log(formData);
+        if (formData.password !== formData.confirmPassword) {
+            toast.error("Passwords do not match");
+            return;
+        }
+        delete formData.confirmPassword;
+        console.log(formData);
+
+        const { data, error } = await authClient.signUp.email(formData)
+        console.log(data, error);
+        if (data) {
+            router.push("/")
+        }
+
+    }
     return (
         <div className="min-h-screen  flex items-center justify-center p-4">
             <div className="w-full max-w-md">
@@ -13,13 +37,7 @@ const SignUp = () => {
                         {/* Header */}
                         <div className="flex flex-col items-center mb-8 gap-3">
                             <div className="p-1 rounded-2xl shadow-sm">
-                                <Image
-                                    src="/logo.jpeg"
-                                    alt="Mr Tech World Logo"
-                                    width={56}
-                                    height={56}
-                                    className="rounded-xl"
-                                />
+                                <Image src="/logo.jpeg" alt="Mr Tech World Logo" width={56} height={56} />
                             </div>
                             <div className="text-center">
                                 <h1 className="text-2xl font-bold text-base-content tracking-tight">Create your account</h1>
@@ -28,7 +46,7 @@ const SignUp = () => {
                         </div>
 
                         {/* Form */}
-                        <form className="space-y-4">
+                        <form onSubmit={handleSubmit} className="space-y-4">
 
                             {/* Full Name */}
                             <div className="form-control gap-1.5">
@@ -36,8 +54,7 @@ const SignUp = () => {
                                     <span className="label-text text-sm font-medium text-base-content/80">Full Name</span>
                                 </label>
                                 <input
-                                    id="fullName"
-                                    name="fullName"
+                                    name="name"
                                     type="text"
                                     placeholder="John Doe"
                                     className="input input-bordered w-full focus:border-violet-400 focus:outline-none transition-colors duration-150"
@@ -90,24 +107,6 @@ const SignUp = () => {
                                     required
                                     minLength={8}
                                 />
-                            </div>
-
-                            {/* Terms */}
-                            <div className="form-control mt-1">
-                                <label className="flex items-start gap-3 cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        name="terms"
-                                        className="checkbox checkbox-sm mt-0.5"
-                                        required
-                                    />
-                                    <span className="text-sm text-base-content/60 leading-relaxed">
-                                        I agree to the{' '}
-                                        <a href="#" className="text-violet-600 font-medium hover:underline">Terms of Service</a>
-                                        {' '}and{' '}
-                                        <a href="#" className="text-violet-600 font-medium hover:underline">Privacy Policy</a>
-                                    </span>
-                                </label>
                             </div>
 
                             {/* Submit */}
