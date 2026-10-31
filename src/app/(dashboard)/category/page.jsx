@@ -9,7 +9,7 @@ import EditCategory from './EditCategory';
 
 const Category = () => {
 
-    const { data: categories, error, isLoading } = useQuery({
+    const { data: categories, error, isLoading, refetch } = useQuery({
         queryKey: ['categories'],
         queryFn: async () => {
             const { data } = await axios.get('http://localhost:5000/categories');
@@ -26,32 +26,33 @@ const Category = () => {
                     <h1 className="text-2xl lg:text-3xl font-bold text-base-content tracking-tight">Categories</h1>
                     <h2 className="text-sm font-normal text-base-content/60 mt-1">Manage and organize all your product categories</h2>
                 </div>
-                <AddCategory className="btn bg-violet-600 hover:bg-violet-700 text-white border-none shadow-sm inline-flex items-center gap-2 cursor-pointer transition-colors duration-150">
+                <AddCategory refetch={refetch} className="btn bg-violet-600 hover:bg-violet-700 text-white border-none shadow-sm inline-flex items-center gap-2 cursor-pointer transition-colors duration-150">
                     <Plus size={18} />
                     <span>Add Category</span>
                 </AddCategory>
             </div>
 
-            {
-                categories?.map((category, index) => (
-                    <div key={category._id} className="">
-                        <table className="table">
-                            {/* head */}
-                            <thead>
-                                <tr>
-                                    <th>S/N</th>
-                                    <th>Category Name</th>
-                                    <th>Description</th>
-                                    <th>Products</th>
-                                    <th>Updated At</th>
-                                    <th className='text-center'>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {/* row 1 */}
-                                <tr>
+            <div className="">
+                <table className="table">
+                    {/* head */}
+                    <thead>
+                        <tr>
+                            <th>S/N</th>
+                            <th>Category Name</th>
+                            <th>Description</th>
+                            <th>Products</th>
+                            <th>Updated At</th>
+                            <th className='text-center'>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {
+                            categories?.map((category, index) => (
+
+
+                                < tr key={index} >
                                     <th className=''>{index + 1}</th>
-                                    <td className='font-semibold'>{category.categoryName}</td>
+                                    <td className='font-semibold'>{category.name}</td>
                                     <td>{category.description}</td>
                                     <td>107</td>
                                     <td>{format(category.updatedAt, "PP")}</td>
@@ -67,18 +68,21 @@ const Category = () => {
                                         </div>
                                     </th>
                                 </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                ))
-            }
+
+
+                            ))
+                        }
+                    </tbody>
+
+                </table>
+            </div>
 
 
 
 
 
 
-        </div>
+        </div >
     );
 };
 

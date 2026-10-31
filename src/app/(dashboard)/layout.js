@@ -3,24 +3,33 @@ import NavLink from '@/Components/NavLink/NavLink';
 import { LayoutDashboard, LayoutGrid, Package, PanelLeftClose, Timeline, TrendingUp } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSession } from '../lib/auth-client';
 import userImage from "../../../public/user.png"
+import Authenticating from '@/Components/Loading/Authenticating';
 
 const DashboardLayout = ({ children }) => {
     const router = useRouter()
-    const { data: user } = useSession()
-    console.log(user?.user);
-    const isActive = false
+    const { data: user, isPending } = useSession()
+    console.log(user);
+
+
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const links = [
         { icon: LayoutDashboard, label: "Overview", to: "/" },
-        { icon: Timeline , label: "Categories", to: "/category" },
+        { icon: Timeline, label: "Categories", to: "/category" },
         { icon: Package, label: "Products", to: "/product" },
         { icon: TrendingUp, label: "Sales Report", to: "/sales-report" }
     ]
-    if (isActive) {
-        return router.push('/signUp')
+    useEffect(() => {
+        if (!isPending && !user) {
+            return router.push('/sign-in')
+        }
+
+    }, [user, isPending])
+
+    if (isPending) {
+        return <Authenticating></Authenticating>
     }
     return (
         <div className="drawer lg:drawer-open min-h-screen ">

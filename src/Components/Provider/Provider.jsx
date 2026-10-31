@@ -1,4 +1,5 @@
 "use client"
+import DataProvider from '@/Context/DataProvider';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { Toaster } from 'react-hot-toast';
@@ -9,7 +10,9 @@ const Provider = ({ children }) => {
         <>
             <Toaster></Toaster>
             <QueryClientProvider client={queryClient}>
-                {children}
+                <DataProvider>
+                    {children}
+                </DataProvider>
             </QueryClientProvider>
         </>
     );

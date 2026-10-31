@@ -1,22 +1,32 @@
 "use client"
-import { EllipsisVertical, Plus } from 'lucide-react';
+import { EllipsisVertical,  Plus } from 'lucide-react';
 import React from 'react';
-import AddProduct from './AddProduct';
 import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import EditProduct from './EditProduct';
+import Link from 'next/link';
 
 const Product = () => {
 
-    const { data: products, error, isLoading, refetch } = useQuery({
+    const { data: products, error, isLoading, refetch: productRefetch } = useQuery({
         queryKey: ['products'],
         queryFn: async () => {
             const { data } = await axios.get('http://localhost:5000/products');
             return data;
         },
     });
+
+    const { data: categories, refetch: categoryRefetch } = useQuery({
+        queryKey: ['categoriesName'],
+        queryFn: async () => {
+            const { data } = await axios.get('http://localhost:5000/categories/names');
+            return data;
+        },
+    });
+
     console.log(products);
+    console.log(categories);
 
     return (
         <div className="space-y-6">
@@ -26,13 +36,13 @@ const Product = () => {
                     <h1 className="text-2xl lg:text-3xl font-bold text-base-content tracking-tight">Products</h1>
                     <h2 className="text-sm font-normal text-base-content/60 mt-1">Manage and organize all your products</h2>
                 </div>
-                <AddProduct refetch={refetch} className="btn bg-violet-600 hover:bg-violet-700 text-white border-none shadow-sm inline-flex items-center gap-2 cursor-pointer transition-colors duration-150">
+                <Link href="/add-product" className="btn bg-violet-600 hover:bg-violet-700 text-white border-none shadow-sm inline-flex items-center gap-2 cursor-pointer transition-colors duration-150">
                     <Plus size={18} />
                     <span>Add Product</span>
-                </AddProduct>
+                </Link>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="">
                 <table className="table">
                     {/* head */}
                     <thead>

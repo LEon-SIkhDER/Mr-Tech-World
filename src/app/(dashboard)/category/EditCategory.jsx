@@ -35,16 +35,16 @@ const EditCategory = ({ category, children, className }) => {
 
                                 {/* Category Name */}
                                 <div className="form-control gap-1.5">
-                                    <label className="label py-0" htmlFor="categoryName">
+                                    <label className="label py-0">
                                         <span className="label-text text-sm font-medium text-base-content/80">Category Name</span>
                                     </label>
                                     <input
-                                        name="categoryName"
+                                        name="name"
                                         type="text"
                                         placeholder="e.g. Smartphones, Laptops"
                                         className="input input-bordered w-full focus:border-violet-400 focus:outline-none transition-colors duration-150"
                                         required
-                                        defaultValue={category?.categoryName}
+                                        defaultValue={category?.name}
                                     />
                                 </div>
 
