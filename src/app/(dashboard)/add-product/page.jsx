@@ -1,15 +1,16 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { Plus, RefreshCw, Save, X } from 'lucide-react';
+import { Plus, RefreshCw, Save, Scan, X } from 'lucide-react';
 import React, { useContext, useRef, useState } from 'react';
 import AddCategory from '../category/AddCategory';
 import DataContext from '@/Context/DataContext';
 import Link from 'next/link';
+import toast from 'react-hot-toast';
 
 const AddProduct = () => {
     const { selectRef } = useContext(DataContext)
-    const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), value: [] }]) // 2, 3, 4
+    const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), name: "", value: [] }]) // 2, 3, 4
     const [combinations, setCombinations] = useState([])
     const removedCombination = useRef([])
     // console.log(variantCount);
@@ -27,15 +28,24 @@ const AddProduct = () => {
         // console.log(formData);
         console.log(combinations);
 
+        const activeVariants = variantCount.filter(v => v.value && v.value.length > 0)
+
         const variants = combinations.map((combination, index) => {
+            const attributes = combination.map((val, i) => ({
+                name: activeVariants[i]?.name || `Option ${i + 1}`,
+                value: val
+            }))
+
             const variantObj = {
                 combination,
                 title: combination.join(" / "),
+                attributes,
                 barcode: formData[`barcode${index + 1}`],
-                purchasePrice: formData[`purchasePrice${index + 1}`],
-                retailPrice: formData[`retailPrice${index + 1}`],
-                mrp: formData[`mrp${index + 1}`],
-                quantity: formData[`quantity${index + 1}`],
+                purchasePrice: Number(formData[`purchasePrice${index + 1}`]) || 0,
+                retailPrice: Number(formData[`retailPrice${index + 1}`]) || 0,
+                mrp: Number(formData[`mrp${index + 1}`]) || 0,
+                imeis: IMEIs.find(obj => obj[combination.join(",")])?.[combination.join(",")] || [],
+                quantity: Number(formData[`quantity${index + 1}`]) || 0,
             }
             delete formData[`barcode${index + 1}`]
             delete formData[`purchasePrice${index + 1}`]
@@ -45,7 +55,12 @@ const AddProduct = () => {
 
             return variantObj
         })
+        // number conversation
+        formData.warranty = Number(formData.warranty) || 0
+        formData.variantTypes = activeVariants.map(v => v.name)
         formData.variants = variants
+        formData.hasImei = formData.hasImei === "on" ? true : false
+
         console.log(formData);
     }
     const addNewVariant = () => {
@@ -63,7 +78,11 @@ const AddProduct = () => {
             }
         })());
 
-        setVariantCount(prev => [...prev, { id: tempId, value: [] }])
+        setVariantCount(prev => [...prev, { id: tempId, name: "", value: [] }])
+    }
+
+    const handleVariantName = (id, name) => {
+        setVariantCount(prev => prev.map(variant => variant.id === id ? { ...variant, name } : variant))
     }
 
     const removeVariant = (tempId) => {
@@ -79,14 +98,25 @@ const AddProduct = () => {
             e.preventDefault()
             // console.log(e.key);
             const theInput = e.target.value.trim()
+            if (!theInput) return
+            const currentVariant = variantCount.find(v => v.id === id)
+            // Prevent duplicate (Case-insensitive check: "Red" vs "red")
+            const isDuplicate = currentVariant?.value?.some(
+                val => val.toLowerCase() === theInput.toLowerCase()
+            )
+            if (isDuplicate) {
+                toast.error(`"${theInput}" has already been added to this variant!`)
+                e.target.value = ""
+                return
+            }
 
             const newVariantValue = variantCount.map((value) => {
                 if (value.id === id) {
                     if (value.value) {
-                        return { id: value.id, value: [...value.value, theInput] }
+                        return { ...value, value: [...value.value, theInput] }
 
                     }
-                    return { id: value.id, value: [theInput] }
+                    return { ...value, value: [theInput] }
                 }
                 return value
             })
@@ -106,7 +136,10 @@ const AddProduct = () => {
         // console.log(variantValue);
         const allVariantValueArray = variantValue.map(item => item.value).filter(item => item && item.length > 0)
         // console.log(allVariantValueArray);
-
+        if (allVariantValueArray.length === 0) {
+            setCombinations([])
+            return
+        }
         let combination = [[]]
 
         for (let singleArrayValue of allVariantValueArray) {
@@ -137,7 +170,7 @@ const AddProduct = () => {
             const newVariantValue = prev.map(obj => {
                 if (obj.id === id) {
                     const tempValue = obj.value.filter((prevValue) => prevValue !== value)
-                    return { id: obj.id, value: tempValue }
+                    return { ...obj, value: tempValue }
                 } else {
                     return obj
                 }
@@ -154,7 +187,63 @@ const AddProduct = () => {
 
     }
     // console.log(combinations);
+    // imei related code
+    const modalRef = useRef()
+    const [hasIMEI, setHasIMEI] = useState(false)
+    const [activeComboModal, setActiveComboModal] = useState("")
+    const [IMEIs, setIMEIs] = useState([])
 
+    const openModal = (activeKey) => {
+        setActiveComboModal(activeKey.join(","))
+        modalRef.current.showModal()
+    }
+
+    const handleAddIMEI = (e) => {
+        const value = e.target.value.trim()
+        if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault()
+            if (!value) return
+            const isDuplicate = IMEIs.some(obj => Object.values(obj)[0]?.includes(value))
+            if (isDuplicate) {
+                toast.error(`IMEI "${value}" has already been added!`)
+                return
+            }
+            e.target.value = ""
+
+
+            setIMEIs(prev => {
+                const prevIMEI = prev.find(obj => obj[activeComboModal])?.[activeComboModal] || []
+                // console.log(prevIMEI);
+                if (IMEIs.length > 0) {
+                    const prevObj = IMEIs.find(obj => obj[activeComboModal])
+                    if (prevObj) {
+                        return prev.map(obj =>
+                            obj[activeComboModal] ? { [activeComboModal]: [...obj[activeComboModal], value] } : obj
+                        )
+                    }
+                    return [...prev, { [activeComboModal]: [...prevIMEI, value] }]
+                }
+                return [{ [activeComboModal]: [...prevIMEI, value] }]
+            })
+        }
+    }
+    const IMEIsToMap = IMEIs.find(obj => obj[activeComboModal])?.[activeComboModal] || []
+
+    const handleRemoveIMEI = (imei) => {
+        // console.log("this imei to delete", imei, "from:", IMEIs, "activeModal:", activeComboModal)
+        console.log(IMEIs);
+
+        const thisIsTheObj = IMEIs.find(obj => obj[activeComboModal])
+        if (!thisIsTheObj) return
+        const filteredArray = thisIsTheObj[activeComboModal].filter(value => value !== imei)
+
+        setIMEIs(prev => {
+            return prev.map(obj => obj[activeComboModal] ? { [activeComboModal]: filteredArray } : obj)
+        })
+
+    }
+    // console.log(IMEIs, activeComboModal);
+    console.log(variantCount, combinations)
 
     return (
         <div className=''>
@@ -206,6 +295,11 @@ const AddProduct = () => {
                                 <option value="used">Used</option>
                             </select>
                         </div>
+                        <div>
+                            <label>Supplier</label>
+                            <input name='supplier' type="text" className='input' placeholder='Enter Supplier Name' />
+                        </div>
+
                         {/* Place this right below Condition inside the grid */}
                         <div className='col-span-4'>
                             <label className="block mb-1">Product Description</label>
@@ -226,11 +320,11 @@ const AddProduct = () => {
                     </div>
                     <div className='space-y-5 mt-5'>
                         {
-                            variantCount.map((variant) =>
+                            variantCount?.map((variant) =>
                                 <div key={variant.id} className='rounded-2xl flex items-end gap-2 p-5 border border-gray-300 bg-gray-100'>
                                     <div className='shrink-0'>
                                         <label className='block'>Variant Name</label>
-                                        <input className='input' type="text" placeholder='Enter variant name' />
+                                        <input className='input' type="text" placeholder='Enter variant name' value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} />
                                     </div>
                                     <div className='w-full ml-2'>
                                         <label className='block'>Variant Value</label>
@@ -263,15 +357,23 @@ const AddProduct = () => {
                             <h1>3. Variant Pricing & Inventory</h1>
                             <p>Set individual price, stock quantity, and barcode for each variant.</p>
                         </div>
-                        <button onClick={regenerateCombination} type='button' className='btn bg-blue-500/10 text-blue-500 border border-blue-500 group hover:shadow hover:shadow-blue-200' >
-                            <RefreshCw size={16} className='group-hover:rotate-180 duration-300' /> Regenerate
-                        </button>
+                        <div className='flex gap-2'>
+                            <label className='btn '>
+                                <input onChange={(e) => setHasIMEI(e.target.checked)} type="checkbox" className='checkbox checkbox-sm' name='hasImei' />
+                                <span className='text-xs'>
+                                    TRACK IMEI
+                                </span>
+                            </label>
+                            <button onClick={regenerateCombination} type='button' className='btn bg-blue-500/10 text-blue-500 border border-blue-500 group hover:shadow hover:shadow-blue-200' >
+                                <RefreshCw size={16} className='group-hover:rotate-180 duration-300' /> Regenerate
+                            </button>
+                        </div>
                     </div>
 
                     <div className="">
                         <table className="table">
                             <thead>
-                                <tr className="uppercase">
+                                <tr className="uppercase *:px-2">
                                     <th>S/N</th>
                                     <th>Variant Combinations</th>
                                     <th>Barcode</th>
@@ -279,31 +381,45 @@ const AddProduct = () => {
                                     <th>Retail Price</th>
                                     <th>MRP</th>
                                     <th>QTY</th>
+                                    {hasIMEI &&
+                                        <th>IMEI</th>
+                                    }
                                     <th className='text-center'>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {
-                                    combinations.map((combination, index) =>
-                                        <tr key={combination.join(",")} className="hover:bg-base-200/40">
-                                            <th>{index + 1}</th>
-                                            <td className="min-w-40">
-                                                <div className='flex flex-wrap gap-1.5'>
-                                                    {combination.map((value, i) =>
-                                                        <span key={i} className='badge badge-sm bg-gray-200 text-gray-700 font-medium'>{value}</span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td><input name={`barcode${index + 1}`} type="number" className="input input-sm input-bordered w-44" placeholder="Scan or enter barcode" /></td>
-                                            <td><input name={`purchasePrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                            <td><input name={`retailPrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                            <td><input name={`mrp${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                            <td><input name={`quantity${index + 1}`} type="number" min="0" className="input input-sm input-bordered w-20" placeholder="0" /></td>
-                                            <td className='text-center'>
-                                                <button onClick={() => removeCombination(combination)} type='button' className='btn btn-ghost btn-xs btn-square text-error hover:bg-error/20'><X size={15} /></button>
-                                            </td>
-                                        </tr>
-                                    )
+                                    combinations.map((combination, index) => {
+                                        const IMEI = IMEIs.find(obj => obj[combination.join(',')])?.[combination.join(",")] || []
+                                        console.log(IMEI);
+
+                                        return (
+                                            <tr key={combination.join(",")} className="hover:bg-base-200/40 *:px-2">
+                                                <th>{index + 1}</th>
+                                                <td className="min-w-40">
+                                                    <div className='flex flex-wrap gap-1.5'>
+                                                        {combination.map((value, i) =>
+                                                            <span key={i} className='badge badge-sm bg-gray-200 text-gray-700 font-medium'>{value}</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td><input name={`barcode${index + 1}`} type="text" className="input input-sm input-bordered w-44" placeholder="Scan or enter barcode" /></td>
+                                                <td><input name={`purchasePrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
+                                                <td><input name={`retailPrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
+                                                <td><input name={`mrp${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
+                                                <td><input name={`quantity${index + 1}`} value={hasIMEI ? IMEI.length : undefined} type="number" min="0" className={`input input-sm input-bordered w-20 ${hasIMEI ? "bg-violet-50 font-bold text-violet-700 cursor-not-allowed" : ""}`} placeholder="0" readOnly={hasIMEI} /></td>
+                                                {
+                                                    hasIMEI &&
+                                                    <td>
+                                                        <button onClick={() => openModal(combination)} type='button' className='btn btn-sm btn-dash btn-primary'>Add IMEIs</button>
+                                                    </td>
+                                                }
+                                                <td className='text-center'>
+                                                    <button onClick={() => removeCombination(combination)} type='button' className='btn btn-ghost btn-xs btn-square text-error hover:bg-error/20'><X size={15} /></button>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })
                                 }
 
                             </tbody>
@@ -320,6 +436,36 @@ const AddProduct = () => {
                     </button>
                 </div>
             </form>
+
+            {/* modal  */}
+            < dialog ref={modalRef} className="modal" >
+                <div className="modal-box">
+                    <form method="dialog">
+                        {/* if there is a button in form, it will close the modal */}
+                        <button className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+                    </form>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Scan or Enter IMEI</label>
+                    <div className="relative">
+
+                        <input
+                            type="text"
+                            onKeyDown={handleAddIMEI}
+                            placeholder="Scan IMEI or paste multiple (Enter to add)..."
+                            className="input input-bordered w-full pr-10 font-mono text-sm focus:border-violet-400 focus:outline-none"
+                            autoFocus
+                        />
+                        <Scan size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1 mt-5">Scanned IMEIs ({IMEIsToMap.length})</label>
+                    <div className='w-full min-h-28 max-h-96 overflow-y-auto rounded bg-gray-100 border border-gray-200 p-3 flex gap-1 flex-wrap items-start'>
+                        {
+                            IMEIsToMap.map((item) =>
+                                <h1 className='bg-white px-2 rounded border border-gray-300 flex items-center' key={item}>{item} <button className='cursor-pointer hover:text-red-500' onClick={() => handleRemoveIMEI(item)}><X size={16} /></button> </h1>
+                            )
+                        }
+                    </div>
+                </div>
+            </dialog >
         </div>
     );
 };
