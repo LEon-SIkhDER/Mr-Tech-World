@@ -2,6 +2,18 @@
 const nextConfig = {
   /* config options here */
   reactCompiler: true,
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'res.cloudinary.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'img.daisyui.com',
+      },
+    ],
+  },
   turbopack: {
     rules: {
       "*.css": {
@@ -10,6 +22,7 @@ const nextConfig = {
       },
     },
   },
+  // images:{}
 };
 
 export default nextConfig;

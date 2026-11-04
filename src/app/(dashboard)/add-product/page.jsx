@@ -1,471 +1,466 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { Plus, RefreshCw, Save, Scan, X } from 'lucide-react';
-import React, { useContext, useRef, useState } from 'react';
+import { ArrowLeft, Plus, Save, UploadCloud, X } from 'lucide-react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
+import imageCompression from 'browser-image-compression';
 import AddCategory from '../category/AddCategory';
 import DataContext from '@/Context/DataContext';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
+import upLoadImagesToCloudinary from '@/app/lib/upLoadImagesToCloudinary';
 
 const AddProduct = () => {
-    const { selectRef } = useContext(DataContext)
-    const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), name: "", value: [] }]) // 2, 3, 4
-    const [combinations, setCombinations] = useState([])
-    const removedCombination = useRef([])
-    // console.log(variantCount);
+    const router = useRouter();
+    const { selectRef } = useContext(DataContext);
+    const [submitting, setSubmitting] = useState(false);
+    // Stores an array of { file, preview } objects (previews generated from original files)
+    const [images, setImages] = useState([]);
+    // Holds quietly compressed File objects in background, ready for Cloudinary upload
+    const compressedImagesRef = useRef([]);
+    const compressedCache = useRef(new Map());
+    const fileInputRef = useRef(null);
+    const imagesRef = useRef([]);
+
+    // Variants State
+    const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), name: "", value: [] }]);
+
     const { data: categoriesName, refetch } = useQuery({
         queryKey: ["categoriesName"],
         queryFn: async () => {
-            const { data: result } = await axios.get("http://localhost:5000/categories/names")
-            return result
+            const { data: result } = await axios.get("http://localhost:5000/categories/names");
+            return result;
         }
-    })
-    // console.log(categoriesName);
-    const handleAddProduct = (e) => {
-        e.preventDefault()
-        const formData = Object.fromEntries(new FormData(e.target))
-        // console.log(formData);
-        console.log(combinations);
+    });
 
-        const activeVariants = variantCount.filter(v => v.value && v.value.length > 0)
-
-        const variants = combinations.map((combination, index) => {
-            const attributes = combination.map((val, i) => ({
-                name: activeVariants[i]?.name || `Option ${i + 1}`,
-                value: val
-            }))
-
-            const variantObj = {
-                combination,
-                title: combination.join(" / "),
-                attributes,
-                barcode: formData[`barcode${index + 1}`],
-                purchasePrice: Number(formData[`purchasePrice${index + 1}`]) || 0,
-                retailPrice: Number(formData[`retailPrice${index + 1}`]) || 0,
-                mrp: Number(formData[`mrp${index + 1}`]) || 0,
-                imeis: IMEIs.find(obj => obj[combination.join(",")])?.[combination.join(",")] || [],
-                quantity: Number(formData[`quantity${index + 1}`]) || 0,
+    const successSwal = () => {
+        Swal.fire({
+            title: "Product Saved Successfully!",
+            text: "What would you like to do next?",
+            icon: "success",
+            showCancelButton: true,
+            confirmButtonText: "View All Products",
+            cancelButtonText: "Add Another Product",
+            confirmButtonColor: "#4f46e5",
+            cancelButtonColor: "#64748b",
+            reverseButtons: true,
+        }).then((result) => {
+            if (result.isConfirmed) {
+                router.push("/product");
             }
-            delete formData[`barcode${index + 1}`]
-            delete formData[`purchasePrice${index + 1}`]
-            delete formData[`retailPrice${index + 1}`]
-            delete formData[`mrp${index + 1}`]
-            delete formData[`quantity${index + 1}`]
+        });
+    };
 
-            return variantObj
-        })
-        // number conversation
-        formData.warranty = Number(formData.warranty) || 0
-        formData.variantTypes = activeVariants.map(v => v.name)
-        formData.variants = variants
-        formData.hasImei = formData.hasImei === "on" ? true : false
+    const resetFormPage = (formEl) => {
+        if (formEl?.reset) {
+            formEl.reset();
+        }
+        images.forEach(img => {
+            if (img.preview?.startsWith('blob:')) URL.revokeObjectURL(img.preview);
+        });
+        setImages([]);
+        compressedImagesRef.current = [];
+        compressedCache.current.clear();
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+        setVariantCount([{ id: crypto.randomUUID(), name: "", value: [] }]);
+    };
 
-        console.log(formData);
-    }
+    // Variant Handlers
     const addNewVariant = () => {
-        let tempId
+        let tempId;
         do {
-            tempId = crypto.randomUUID()
-        } while ((() => {
-            // variantCount.includes(tempId)
-            const isIncluded = variantCount.filter((variant) => variant.id === tempId)
-            if (isIncluded.length === 0) {
-                return false
-            }
-            else {
-                return true
-            }
-        })());
+            tempId = crypto.randomUUID();
+        } while (variantCount.some((variant) => variant.id === tempId));
 
-        setVariantCount(prev => [...prev, { id: tempId, name: "", value: [] }])
-    }
+        setVariantCount(prev => [...prev, { id: tempId, name: "", value: [] }]);
+    };
 
     const handleVariantName = (id, name) => {
-        setVariantCount(prev => prev.map(variant => variant.id === id ? { ...variant, name } : variant))
-    }
+        setVariantCount(prev => prev.map(variant => variant.id === id ? { ...variant, name } : variant));
+    };
 
     const removeVariant = (tempId) => {
-        // console.log("object");
-        const newVariant = variantCount.filter((variant) => variant.id !== tempId)
-        // console.log(newVariant);
-        newCombination(newVariant)
-        setVariantCount(newVariant)
+        setVariantCount(prev => prev.filter((variant) => variant.id !== tempId));
+    };
 
-    }
     const addVariantValue = (e, id) => {
         if (e.key === "Enter" || e.key === ',') {
-            e.preventDefault()
-            // console.log(e.key);
-            const theInput = e.target.value.trim()
-            if (!theInput) return
-            const currentVariant = variantCount.find(v => v.id === id)
-            // Prevent duplicate (Case-insensitive check: "Red" vs "red")
+            e.preventDefault();
+            const theInput = e.target.value.trim();
+            if (!theInput) return;
+
+            const currentVariant = variantCount.find(v => v.id === id);
             const isDuplicate = currentVariant?.value?.some(
                 val => val.toLowerCase() === theInput.toLowerCase()
-            )
-            if (isDuplicate) {
-                toast.error(`"${theInput}" has already been added to this variant!`)
-                e.target.value = ""
-                return
-            }
-
-            const newVariantValue = variantCount.map((value) => {
-                if (value.id === id) {
-                    if (value.value) {
-                        return { ...value, value: [...value.value, theInput] }
-
-                    }
-                    return { ...value, value: [theInput] }
-                }
-                return value
-            })
-            // console.log(id, newVariantValue);
-            setVariantCount(newVariantValue)
-            // console.log(e.target);
-            e.target.value = ""
-
-            newCombination(newVariantValue)
-            // console.log(newVariantValue);
-
-
-
-        }
-    }
-    const newCombination = (variantValue) => {
-        // console.log(variantValue);
-        const allVariantValueArray = variantValue.map(item => item.value).filter(item => item && item.length > 0)
-        // console.log(allVariantValueArray);
-        if (allVariantValueArray.length === 0) {
-            setCombinations([])
-            return
-        }
-        let combination = [[]]
-
-        for (let singleArrayValue of allVariantValueArray) {
-            combination = combination.flatMap(a =>
-                singleArrayValue.map(b => [...a, b])
             );
-        }
-        // console.log(combination);
-        const removedCombinationInStr = removedCombination?.current?.map(item => item.join(","))
-        const filteredCombination = combination.filter((item) => !removedCombinationInStr.includes(item.join(",")))
-        setCombinations(filteredCombination)
-    }
-    const removeCombination = (single) => {
-        removedCombination.current.push(single)
-        // console.log(single);
-        // console.log(combinations);
-        setCombinations((prev) =>
-            prev.filter((combination) => combination.join(",") !== single.join(","))
-        )
 
-        // console.log(removedCombination.current);
-
-    }
-    const removeVariantValue = (id, value) => {
-        // console.log(id, value);
-        // console.log(variantCount);
-        setVariantCount((prev) => {
-            const newVariantValue = prev.map(obj => {
-                if (obj.id === id) {
-                    const tempValue = obj.value.filter((prevValue) => prevValue !== value)
-                    return { ...obj, value: tempValue }
-                } else {
-                    return obj
-                }
-            })
-            newCombination(newVariantValue)
-            // console.log(newVariantValue)
-            return newVariantValue
-        })
-    }
-
-    const regenerateCombination = () => {
-        removedCombination.current = []
-        newCombination(variantCount)
-
-    }
-    // console.log(combinations);
-    // imei related code
-    const modalRef = useRef()
-    const [hasIMEI, setHasIMEI] = useState(false)
-    const [activeComboModal, setActiveComboModal] = useState("")
-    const [IMEIs, setIMEIs] = useState([])
-
-    const openModal = (activeKey) => {
-        setActiveComboModal(activeKey.join(","))
-        modalRef.current.showModal()
-    }
-
-    const handleAddIMEI = (e) => {
-        const value = e.target.value.trim()
-        if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault()
-            if (!value) return
-            const isDuplicate = IMEIs.some(obj => Object.values(obj)[0]?.includes(value))
             if (isDuplicate) {
-                toast.error(`IMEI "${value}" has already been added!`)
-                return
+                toast.error(`"${theInput}" has already been added to this variant!`);
+                e.target.value = "";
+                return;
             }
-            e.target.value = ""
 
-
-            setIMEIs(prev => {
-                const prevIMEI = prev.find(obj => obj[activeComboModal])?.[activeComboModal] || []
-                // console.log(prevIMEI);
-                if (IMEIs.length > 0) {
-                    const prevObj = IMEIs.find(obj => obj[activeComboModal])
-                    if (prevObj) {
-                        return prev.map(obj =>
-                            obj[activeComboModal] ? { [activeComboModal]: [...obj[activeComboModal], value] } : obj
-                        )
-                    }
-                    return [...prev, { [activeComboModal]: [...prevIMEI, value] }]
+            setVariantCount(prev => prev.map((item) => {
+                if (item.id === id) {
+                    return { ...item, value: [...(item.value || []), theInput] };
                 }
-                return [{ [activeComboModal]: [...prevIMEI, value] }]
-            })
+                return item;
+            }));
+            e.target.value = "";
         }
-    }
-    const IMEIsToMap = IMEIs.find(obj => obj[activeComboModal])?.[activeComboModal] || []
+    };
 
-    const handleRemoveIMEI = (imei) => {
-        // console.log("this imei to delete", imei, "from:", IMEIs, "activeModal:", activeComboModal)
-        console.log(IMEIs);
+    const removeVariantValue = (id, value) => {
+        setVariantCount((prev) => {
+            return prev.map(obj => {
+                if (obj.id === id) {
+                    const tempValue = obj.value.filter((prevValue) => prevValue !== value);
+                    return { ...obj, value: tempValue };
+                }
+                return obj;
+            });
+        });
+    };
 
-        const thisIsTheObj = IMEIs.find(obj => obj[activeComboModal])
-        if (!thisIsTheObj) return
-        const filteredArray = thisIsTheObj[activeComboModal].filter(value => value !== imei)
+    // Keep imagesRef updated for unmount cleanup
+    useEffect(() => {
+        imagesRef.current = images;
+    }, [images]);
 
-        setIMEIs(prev => {
-            return prev.map(obj => obj[activeComboModal] ? { [activeComboModal]: filteredArray } : obj)
-        })
+    // Clean up temporary blob object URLs only when component unmounts
+    useEffect(() => {
+        return () => {
+            imagesRef.current.forEach(img => {
+                if (img.preview?.startsWith('blob:')) URL.revokeObjectURL(img.preview);
+            });
+        };
+    }, []);
 
-    }
-    // console.log(IMEIs, activeComboModal);
-    console.log(variantCount, combinations)
+    // Quietly compress images in the background whenever images change
+    useEffect(() => {
+        const compressQuietly = async () => {
+            const currentFiles = images.map(img => img.file).filter(Boolean);
+            if (currentFiles.length === 0) {
+                compressedImagesRef.current = [];
+                return;
+            }
+
+            // Immediately map ref using any already cached compressed files or original fallback
+            compressedImagesRef.current = currentFiles.map(file => compressedCache.current.get(file) || file);
+
+            // Compress newly added files quietly in background via web worker
+            await Promise.all(
+                currentFiles.map(async (file) => {
+                    if (compressedCache.current.has(file)) return;
+                    try {
+                        const options = {
+                            maxSizeMB: 0.3,
+                            maxWidthOrHeight: 1200,
+                            useWebWorker: true,
+                            fileType: 'image/webp',
+                            initialQuality: 0.8,
+                        };
+                        const compressed = await imageCompression(file, options);
+                        compressedCache.current.set(file, compressed);
+                    } catch (err) {
+                        console.warn('Quiet compression fallback for:', file.name, err);
+                        compressedCache.current.set(file, file);
+                    }
+                })
+            );
+
+            // Keep ref strictly synchronized with current images order
+            compressedImagesRef.current = currentFiles.map(file => compressedCache.current.get(file) || file);
+        };
+
+        compressQuietly();
+    }, [images]);
+
+    // Only handles image validation and creating the visual preview
+    const handleImageUpload = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length === 0) return;
+
+        const validFiles = files.filter(file => {
+            if (!file.type.startsWith("image/")) {
+                toast.error(`${file.name} is not an image file`);
+                return false;
+            }
+            if (file.size > 10 * 1024 * 1024) {
+                toast.error(`${file.name} exceeds 10MB size limit`);
+                return false;
+            }
+            return true;
+        });
+
+        if (validFiles.length === 0) return;
+
+        // Creates preview URL for screen and preserves the raw file for handleAddProduct
+        const newItems = validFiles.map(file => ({
+            file: file,
+            preview: URL.createObjectURL(file)
+        }));
+
+        setImages(prev => [...prev, ...newItems]);
+
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    };
+
+    const handleRemoveImage = (indexToRemove) => {
+        const item = images[indexToRemove];
+        if (item?.preview?.startsWith('blob:')) {
+            URL.revokeObjectURL(item.preview);
+        }
+        setImages(prev => prev.filter((_, index) => index !== indexToRemove));
+    };
+
+    const handleClearAllImages = () => {
+        images.forEach(img => {
+            if (img.preview?.startsWith('blob:')) URL.revokeObjectURL(img.preview);
+        });
+        setImages([]);
+        compressedImagesRef.current = [];
+        compressedCache.current.clear();
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+        }
+    };
+
+    // You handle upload related things here!
+    const handleAddProduct = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const formData = Object.fromEntries(new FormData(form));
+        console.log("Form Data:", formData);
+        console.log("Original Images (for previews):", images);
+        console.log("Compressed Images in Ref (ready for Cloudinary):", compressedImagesRef.current);
+
+        const activeVariants = variantCount.filter(v => v.name?.trim() && v.value && v.value.length > 0);
+        formData.variantTypes = activeVariants.map(v => v.name.trim());
+        formData.variantAttributes = activeVariants.map(v => ({
+            name: v.name.trim(),
+            values: v.value
+        }));
+
+        try {
+            setSubmitting(true)
+            toast.loading("Uploading Images", { id: 'toastId' })
+            const imageURLs = await upLoadImagesToCloudinary(compressedImagesRef.current)
+            toast.loading('Uploading Product', { id: "toastId" })
+            formData.images = imageURLs
+            const { data } = await axios.post("http://localhost:5000/product", formData)
+            if (!data.insertedId) {
+                throw new Error("Failed to add product")
+            }
+            successSwal()
+            toast.dismiss("toastId")
+            resetFormPage(form)
+            setSubmitting(false)
+
+
+        } catch (error) {
+            toast.error(error.message || "Something went wrong", { id: 'toastId' })
+            setSubmitting(false)
+        }
+
+
+
+
+    };
 
     return (
-        <div className=''>
-            <form onSubmit={handleAddProduct} className='max-w-300 mx-auto'>
-                <div className='rounded-2xl shadow p-5 border border-gray-200'>
-                    <div>
-                        <h1>1. Add Product</h1>
-                        <p>Basic information of the parent product.</p>
+        <div className="min-h-screen bg-slate-50">
+            <form onSubmit={handleAddProduct} className="max-w-5xl mx-auto py-8 px-4 space-y-6">
+
+                {/* Page Header */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <div className="flex items-center gap-3">
+                        <Link href="/product" className="btn btn-sm btn-ghost p-1.5 hover:bg-slate-100 text-slate-700">
+                            <ArrowLeft size={18} />
+                        </Link>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-900">Add New Product</h1>
+                            <p className="text-sm text-slate-500 mt-0.5">Define general product details and catalog variants. Inventory stock is received in Purchases.</p>
+                        </div>
                     </div>
-                    <div className='grid grid-cols-4 gap-5'>
-                        <div className='col-span-2'>
-                            <label>Product Name</label>
-                            <input className='input w-full' type="text" name='name' placeholder='Enter Product Name' />
-                        </div>
-                        <div className='flex gap-1 items-end'>
-                            <div className='w-full'>
-                                <label> Product Category</label>
-                                <select className='select w-full' ref={selectRef} name='category'>
-                                    <option value="">Select Category</option>
-                                    {
-                                        categoriesName?.map((category) =>
-                                            <option key={category._id} value={category._id}>{category.name}</option>
-                                        )
-                                    }
-                                </select>
-                                {/* {categoriesName?.length === 0 && <span className='text-xs text-yellow-500'>Please add new category first!</span>} */}
-                            </div>
-                            <div>
-                                <AddCategory className='btn btn-square' refetch={refetch}><Plus size={18} /></AddCategory>
-                            </div>
-                        </div>
-                        <div>
-                            <label>Brand</label>
-                            <input name='brand' type="text" className='input' placeholder='Enter Product Brand' />
-                        </div>
-                        <div>
-                            <label>Model</label>
-                            <input name='model' type="text" className='input' placeholder='Enter Product Model' />
-                        </div>
-                        <div>
-                            <label>Warranty (month)</label>
-                            <input name='warranty' type="text" className='input' placeholder='Enter Product Warranty in month' />
-                        </div>
-                        <div>
-                            <label>Condition</label>
-                            <select name='condition' className='select'>
-                                <option value="new">New</option>
-                                <option value="refurbished">Refurbished</option>
-                                <option value="used">Used</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label>Supplier</label>
-                            <input name='supplier' type="text" className='input' placeholder='Enter Supplier Name' />
+
+                    <Link href="/product" className="btn btn-sm bg-white hover:bg-slate-100 text-slate-700 border border-slate-300">
+                        All Products
+                    </Link>
+                </div>
+
+                {/* Basic Product Info Card */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
+                    <div className="pb-4 border-b border-slate-200">
+                        <h2 className="text-base font-semibold text-slate-900">General Information</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">Basic information of the parent catalog product.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {/* Product Name */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                Product Name <span className="text-rose-500">*</span>
+                            </label>
+                            <input required type="text" name="name" placeholder="e.g. iPhone 15 Pro Max, Galaxy S24 Ultra..." className="input w-full border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
                         </div>
 
-                        {/* Place this right below Condition inside the grid */}
-                        <div className='col-span-4'>
-                            <label className="block mb-1">Product Description</label>
-                            <textarea
-                                name="description"
-                                rows={3}
-                                className='textarea textarea-bordered w-full resize-none'
-                                placeholder='Enter product specifications, key features, or box contents...'
-                            />
+                        {/* Product Category with Add Category Quick Modal */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                Product Category <span className="text-rose-500">*</span>
+                            </label>
+                            <div className="flex gap-2 items-center">
+                                <select required ref={selectRef} name="category" className="select w-full border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 text-sm">
+                                    <option value="">Select Category</option>
+                                    {categoriesName?.map((category) => (
+                                        <option key={category._id} value={category._id}>{category.name}</option>
+                                    ))}
+                                </select>
+                                <AddCategory className="btn btn-square shrink-0 border-slate-300 hover:bg-slate-100" refetch={refetch}>
+                                    <Plus size={18} />
+                                </AddCategory>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                {/* variants */}
-                <div className='rounded-2xl shadow p-5 border border-gray-200 mt-5'>
-                    <div>
-                        <h1>2. Add Variants</h1>
-                        <p>Add variants like Color, Size, RAM, ROM. Each value will multiply into combinations.</p>
-                    </div>
-                    <div className='space-y-5 mt-5'>
-                        {
-                            variantCount?.map((variant) =>
-                                <div key={variant.id} className='rounded-2xl flex items-end gap-2 p-5 border border-gray-300 bg-gray-100'>
-                                    <div className='shrink-0'>
-                                        <label className='block'>Variant Name</label>
-                                        <input className='input' type="text" placeholder='Enter variant name' value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} />
-                                    </div>
-                                    <div className='w-full ml-2'>
-                                        <label className='block'>Variant Value</label>
-                                        <div className='input gap-0 w-full'>
-                                            {
-                                                variant.value?.length > 0 &&
-                                                variant.value.map((value) =>
-                                                    <div key={value} className='flex items-center mr-1  bg-mist-300 rounded font-medium px-1'>
-                                                        <span className='-mt-0.5'>
-                                                            {value}
-                                                        </span>
-                                                        <button onClick={() => removeVariantValue(variant.id, value)} type='button' className='cursor-pointer hover:scale-110'><X className='' size={12} /></button>
-                                                    </div>
-                                                )
-                                            }
-                                            <input onKeyDown={(e) => addVariantValue(e, variant.id)} className=' w-full' type="text" placeholder='Enter variant name(Type & press Enter)' />
+
+                        {/* Brand */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                Brand
+                            </label>
+                            <input name="brand" type="text" placeholder="e.g. Apple, Samsung, Xiaomi..." className="input w-full border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                        </div>
+
+                        {/* Model */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                Model / Model Number
+                            </label>
+                            <input name="model" type="text" placeholder="e.g. A3106, SM-S928B..." className="input w-full border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                        </div>
+
+                        {/* Product Images Field with Multiple Preview and Remove */}
+                        <div className="md:col-span-2 flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                    Product Images {images.length > 0 && <span className="text-slate-400 font-normal">({images.length} selected)</span>}
+                                </label>
+                                {images.length > 0 && (
+                                    <button type="button" onClick={handleClearAllImages} className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline">
+                                        Clear All
+                                    </button>
+                                )}
+                            </div>
+
+                            {images.length > 0 ? (
+                                <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+                                    <div className="flex flex-wrap gap-3 items-center">
+                                        {images.map((imgItem, index) => (
+                                            <div key={imgItem.preview || index} className="relative w-24 h-24 rounded-xl border border-slate-200 bg-white p-1 overflow-hidden group shadow-2xs">
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img src={imgItem.preview || imgItem} alt={`Preview ${index + 1}`} className="w-full h-full object-contain rounded-lg" />
+                                                {index === 0 && (
+                                                    <span className="absolute bottom-1 left-1 bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs pointer-events-none">
+                                                        Thumbnail
+                                                    </span>
+                                                )}
+                                                <button type="button" onClick={() => handleRemoveImage(index)} title="Remove this image" className="absolute top-1 right-1 bg-rose-100 hover:bg-rose-600 hover:text-white text-rose-500 rounded-full p-1 border border-rose-200 shadow-xs transition-colors cursor-pointer">
+                                                    <X size={12} />
+                                                </button>
+                                            </div>
+                                        ))}
+
+                                        {/* Add More button */}
+                                        <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 rounded-xl border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-white hover:bg-indigo-50/40 flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-500 hover:text-indigo-600 gap-1 shrink-0">
+                                            <Plus size={20} />
+                                            <span className="text-[11px] font-medium">Add More</span>
                                         </div>
                                     </div>
-                                    <button type='button' onClick={() => removeVariant(variant.id)} className='cursor-pointer hover:bg-red-200 p-2 rounded duration-200 hover:scale-110 mb-1.25 '><X size={16} /></button>
+                                    <p className="text-xs text-slate-400">First image will be used as the primary thumbnail across POS and product tables.</p>
                                 </div>
-                            )
-                        }
-                        <button type='button' onClick={addNewVariant} className='btn'><Plus size={18} />Add new variant</button>
-                    </div>
-                </div>
-                {/* Price Code */}
-                <div className='rounded-2xl shadow p-5 border border-gray-200 mt-5'>
-                    <div className='flex justify-between'>
-                        <div>
-                            <h1>3. Variant Pricing & Inventory</h1>
-                            <p>Set individual price, stock quantity, and barcode for each variant.</p>
+                            ) : (
+                                <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-xl p-6 text-center cursor-pointer transition-colors duration-150 flex flex-col items-center justify-center gap-1.5 bg-slate-50/60">
+                                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 mb-1">
+                                        <UploadCloud size={20} />
+                                    </div>
+                                    <p className="text-sm font-medium text-slate-700">Click to upload product images</p>
+                                    <p className="text-xs text-slate-400">Select one or multiple images</p>
+                                </div>
+                            )}
+                            <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
                         </div>
-                        <div className='flex gap-2'>
-                            <label className='btn '>
-                                <input onChange={(e) => setHasIMEI(e.target.checked)} type="checkbox" className='checkbox checkbox-sm' name='hasImei' />
-                                <span className='text-xs'>
-                                    TRACK IMEI
-                                </span>
+
+                        {/* Description */}
+                        <div className="md:col-span-2 flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                Product Description &amp; Specifications
                             </label>
-                            <button onClick={regenerateCombination} type='button' className='btn bg-blue-500/10 text-blue-500 border border-blue-500 group hover:shadow hover:shadow-blue-200' >
-                                <RefreshCw size={16} className='group-hover:rotate-180 duration-300' /> Regenerate
-                            </button>
+                            <textarea name="description" rows={4} placeholder="Enter specifications, key features, or box contents..." className="textarea textarea-bordered w-full resize-none border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Section 2: Dynamic Variant Attributes (Color, RAM, Storage) */}
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
+                    <div className="pb-4 border-b border-slate-200 flex items-center gap-2.5">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
+                        <div>
+                            <h2 className="text-base font-semibold text-slate-900">Add Variants</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">Define variant attributes (e.g. Color, Storage, RAM). Pricing and stock for combinations are managed in Purchases.</p>
                         </div>
                     </div>
 
-                    <div className="">
-                        <table className="table">
-                            <thead>
-                                <tr className="uppercase *:px-2">
-                                    <th>S/N</th>
-                                    <th>Variant Combinations</th>
-                                    <th>Barcode</th>
-                                    <th>Purchase Price</th>
-                                    <th>Retail Price</th>
-                                    <th>MRP</th>
-                                    <th>QTY</th>
-                                    {hasIMEI &&
-                                        <th>IMEI</th>
-                                    }
-                                    <th className='text-center'>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {
-                                    combinations.map((combination, index) => {
-                                        const IMEI = IMEIs.find(obj => obj[combination.join(',')])?.[combination.join(",")] || []
-                                        console.log(IMEI);
+                    <div className="space-y-4">
+                        {variantCount?.map((variant) => (
+                            <div key={variant.id} className="rounded-xl flex items-end gap-3 p-4 border border-slate-200 bg-slate-50">
+                                <div className="shrink-0 flex flex-col gap-1">
+                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Name</label>
+                                    <input value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} type="text" placeholder="e.g. Color" className="input border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                                </div>
+                                <div className="w-full flex flex-col gap-1">
+                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Values</label>
+                                    <div className="input gap-0 w-full border-slate-300 bg-white flex items-center min-h-10">
+                                        {variant.value?.length > 0 &&
+                                            variant.value.map((value) => (
+                                                <div key={value} className="flex items-center mr-1 bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 text-xs font-medium gap-1">
+                                                    <span>{value}</span>
+                                                    <button onClick={() => removeVariantValue(variant.id, value)} type="button" className="cursor-pointer hover:scale-110 text-indigo-500 hover:text-indigo-700">
+                                                        <X size={11} />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        <input onKeyDown={(e) => addVariantValue(e, variant.id)} type="text" placeholder="Type a value & press Enter" className="w-full text-sm text-slate-800 placeholder:text-slate-400 outline-none bg-transparent" />
+                                    </div>
+                                </div>
+                                <button type="button" onClick={() => removeVariant(variant.id)} className="cursor-pointer hover:bg-rose-100 hover:text-rose-600 text-slate-400 p-2 rounded-lg duration-200 hover:scale-110 mb-0.5">
+                                    <X size={16} />
+                                </button>
+                            </div>
+                        ))}
 
-                                        return (
-                                            <tr key={combination.join(",")} className="hover:bg-base-200/40 *:px-2">
-                                                <th>{index + 1}</th>
-                                                <td className="min-w-40">
-                                                    <div className='flex flex-wrap gap-1.5'>
-                                                        {combination.map((value, i) =>
-                                                            <span key={i} className='badge badge-sm bg-gray-200 text-gray-700 font-medium'>{value}</span>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td><input name={`barcode${index + 1}`} type="text" className="input input-sm input-bordered w-44" placeholder="Scan or enter barcode" /></td>
-                                                <td><input name={`purchasePrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                                <td><input name={`retailPrice${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                                <td><input name={`mrp${index + 1}`} type="number" step="0.01" className="input input-sm input-bordered w-32" placeholder="0.00" /></td>
-                                                <td><input name={`quantity${index + 1}`} value={hasIMEI ? IMEI.length : undefined} type="number" min="0" className={`input input-sm input-bordered w-20 ${hasIMEI ? "bg-violet-50 font-bold text-violet-700 cursor-not-allowed" : ""}`} placeholder="0" readOnly={hasIMEI} /></td>
-                                                {
-                                                    hasIMEI &&
-                                                    <td>
-                                                        <button onClick={() => openModal(combination)} type='button' className='btn btn-sm btn-dash btn-primary'>Add IMEIs</button>
-                                                    </td>
-                                                }
-                                                <td className='text-center'>
-                                                    <button onClick={() => removeCombination(combination)} type='button' className='btn btn-ghost btn-xs btn-square text-error hover:bg-error/20'><X size={15} /></button>
-                                                </td>
-                                            </tr>
-                                        )
-                                    })
-                                }
-
-                            </tbody>
-                        </table>
+                        <button type="button" onClick={addNewVariant} className="btn btn-sm border-slate-300 text-slate-600 hover:bg-slate-100 bg-white gap-1.5">
+                            <Plus size={16} /> Add New Variant
+                        </button>
                     </div>
                 </div>
-                {/* Action Buttons at the bottom */}
-                <div className="flex items-center justify-end gap-3 mt-6">
-                    <Link href="/product" className="btn btn-ghost">
+
+                {/* Bottom Action Bar */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
+                    <Link href="/product" className="btn btn-sm border-slate-300 text-slate-600 bg-white hover:bg-slate-100">
                         Cancel
                     </Link>
-                    <button type="submit" className="btn bg-violet-600 hover:bg-violet-700 text-white shadow-sm">
-                        Save Product
+                    <button disabled={submitting} type="submit" className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-none shadow-sm gap-2 px-6">
+                        <Save size={16} /> Save Product
                     </button>
                 </div>
+
             </form>
-
-            {/* modal  */}
-            < dialog ref={modalRef} className="modal" >
-                <div className="modal-box">
-                    <form method="dialog">
-                        {/* if there is a button in form, it will close the modal */}
-                        <button className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
-                    </form>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Scan or Enter IMEI</label>
-                    <div className="relative">
-
-                        <input
-                            type="text"
-                            onKeyDown={handleAddIMEI}
-                            placeholder="Scan IMEI or paste multiple (Enter to add)..."
-                            className="input input-bordered w-full pr-10 font-mono text-sm focus:border-violet-400 focus:outline-none"
-                            autoFocus
-                        />
-                        <Scan size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    </div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1 mt-5">Scanned IMEIs ({IMEIsToMap.length})</label>
-                    <div className='w-full min-h-28 max-h-96 overflow-y-auto rounded bg-gray-100 border border-gray-200 p-3 flex gap-1 flex-wrap items-start'>
-                        {
-                            IMEIsToMap.map((item) =>
-                                <h1 className='bg-white px-2 rounded border border-gray-300 flex items-center' key={item}>{item} <button className='cursor-pointer hover:text-red-500' onClick={() => handleRemoveIMEI(item)}><X size={16} /></button> </h1>
-                            )
-                        }
-                    </div>
-                </div>
-            </dialog >
         </div>
     );
 };

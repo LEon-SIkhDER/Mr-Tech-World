@@ -5,7 +5,7 @@ import './NavLink.css';
 
 const NavLink = ({className,  children, to }) => {
     const location  = usePathname();
-    console.log(location);
+    // console.log(location);
     const isActive = location === to;
 
     return (

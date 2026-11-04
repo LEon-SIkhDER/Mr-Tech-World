@@ -14,13 +14,13 @@ const SignIn = () => {
         formData.rememberMe = formData.remember === "on"
         delete formData.remember
         const { data, error } = await authClient.signIn.email(formData);
-
-        if (error) {
-            toast.error(error.message || error.statusText || "Something went wrong")
-        }
         if (data) {
             router.push("/")
         }
+        if (error) {
+            toast.error(error.message || error.statusText || "Something went wrong")
+        }
+
         console.log(data, error);
     }
     return (
