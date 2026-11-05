@@ -1,7 +1,7 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { ArrowLeft, Plus, Save, UploadCloud, X } from 'lucide-react';
+import { ArrowLeft, Layers, Package, Plus, Save, UploadCloud, X } from 'lucide-react';
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import imageCompression from 'browser-image-compression';
 import AddCategory from '../category/AddCategory';
@@ -23,6 +23,9 @@ const AddProduct = () => {
     const compressedCache = useRef(new Map());
     const fileInputRef = useRef(null);
     const imagesRef = useRef([]);
+
+    // Product Type State ('simple' | 'variable')
+    const [productType, setProductType] = useState("simple");
 
     // Variants State
     const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), name: "", value: [] }]);
@@ -67,6 +70,7 @@ const AddProduct = () => {
             fileInputRef.current.value = "";
         }
         setVariantCount([{ id: crypto.randomUUID(), name: "", value: [] }]);
+        setProductType("simple");
     };
 
     // Variant Handlers
@@ -241,37 +245,56 @@ const AddProduct = () => {
         console.log("Original Images (for previews):", images);
         console.log("Compressed Images in Ref (ready for Cloudinary):", compressedImagesRef.current);
 
-        const activeVariants = variantCount.filter(v => v.name?.trim() && v.value && v.value.length > 0);
-        formData.variantTypes = activeVariants.map(v => v.name.trim());
-        formData.variantAttributes = activeVariants.map(v => ({
-            name: v.name.trim(),
-            values: v.value
-        }));
+        formData.productType = productType;
 
-        try {
-            setSubmitting(true)
-            toast.loading("Uploading Images", { id: 'toastId' })
-            const imageURLs = await upLoadImagesToCloudinary(compressedImagesRef.current)
-            toast.loading('Uploading Product', { id: "toastId" })
-            formData.images = imageURLs
-            const { data } = await axios.post("http://localhost:5000/product", formData)
-            if (!data.insertedId) {
-                throw new Error("Failed to add product")
+        if (productType === "variable") {
+            const activeVariants = variantCount.filter(v => v.name?.trim() && v.value && v.value.length > 0);
+            if (activeVariants.length === 0) {
+                toast.error("Please add at least one variant attribute (with name and values), or switch to Simple Product.");
+                return;
             }
-            successSwal()
-            toast.dismiss("toastId")
-            resetFormPage(form)
-            setSubmitting(false)
-
-
-        } catch (error) {
-            toast.error(error.message || "Something went wrong", { id: 'toastId' })
-            setSubmitting(false)
+            formData.variantTypes = activeVariants.map(v => v.name.trim());
+            formData.variantAttributes = activeVariants.map(v => ({
+                name: v.name.trim(),
+                values: v.value
+            }));
+            formData.variants = [];
+        } else {
+            formData.variantTypes = [];
+            formData.variantAttributes = [];
+            formData.variants = [
+                {
+                    title: "Standard",
+                    combination: [],
+                    attributes: [],
+                    barcode: "",
+                    retailPrice: 0,
+                    mrp: 0,
+                    quantity: 0,
+                    batches: [],
+                    imeis: []
+                }
+            ];
         }
 
-
-
-
+        try {
+            setSubmitting(true);
+            toast.loading("Uploading Images", { id: 'toastId' });
+            const imageURLs = await upLoadImagesToCloudinary(compressedImagesRef.current);
+            toast.loading('Uploading Product', { id: "toastId" });
+            formData.images = imageURLs;
+            const { data } = await axios.post("http://localhost:5000/product", formData);
+            if (!data.insertedId) {
+                throw new Error("Failed to add product");
+            }
+            successSwal();
+            toast.dismiss("toastId");
+            resetFormPage(form);
+            setSubmitting(false);
+        } catch (error) {
+            toast.error(error.message || "Something went wrong", { id: 'toastId' });
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -297,9 +320,12 @@ const AddProduct = () => {
 
                 {/* Basic Product Info Card */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
-                    <div className="pb-4 border-b border-slate-200">
-                        <h2 className="text-base font-semibold text-slate-900">General Information</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">Basic information of the parent catalog product.</p>
+                    <div className="pb-4 border-b border-slate-200 flex items-center gap-2.5">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">1</span>
+                        <div>
+                            <h2 className="text-base font-semibold text-slate-900">General Information</h2>
+                            <p className="text-xs text-slate-500 mt-0.5">Basic information of the parent catalog product.</p>
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -406,48 +432,77 @@ const AddProduct = () => {
                     </div>
                 </div>
 
-                {/* Section 2: Dynamic Variant Attributes (Color, RAM, Storage) */}
+                {/* Section 2: Dynamic Variant Attributes / Product Type */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
-                    <div className="pb-4 border-b border-slate-200 flex items-center gap-2.5">
-                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
-                        <div>
-                            <h2 className="text-base font-semibold text-slate-900">Add Variants</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">Define variant attributes (e.g. Color, Storage, RAM). Pricing and stock for combinations are managed in Purchases.</p>
+                    <div className="pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
+                            <div>
+                                <h2 className="text-base font-semibold text-slate-900">Product Type &amp; Variants</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">Select product type and configure attributes if applicable.</p>
+                            </div>
+                        </div>
+
+                        {/* Segmented Button: Simple Product vs Variable Product */}
+                        <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0 self-start sm:self-auto">
+                            <button type="button" onClick={() => setProductType("simple")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-1.5 cursor-pointer ${productType === "simple" ? "bg-white text-indigo-600 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}>
+                                <Package size={14} />
+                                <span>Simple Product</span>
+                            </button>
+                            <button type="button" onClick={() => setProductType("variable")} className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 flex items-center gap-1.5 cursor-pointer ${productType === "variable" ? "bg-white text-indigo-600 shadow-xs" : "text-slate-600 hover:text-slate-900"}`}>
+                                <Layers size={14} />
+                                <span>Variable Product</span>
+                            </button>
                         </div>
                     </div>
 
-                    <div className="space-y-4">
-                        {variantCount?.map((variant) => (
-                            <div key={variant.id} className="rounded-xl flex items-end gap-3 p-4 border border-slate-200 bg-slate-50">
-                                <div className="shrink-0 flex flex-col gap-1">
-                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Name</label>
-                                    <input value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} type="text" placeholder="e.g. Color" className="input border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
-                                </div>
-                                <div className="w-full flex flex-col gap-1">
-                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Values</label>
-                                    <div className="input gap-0 w-full border-slate-300 bg-white flex items-center min-h-10">
-                                        {variant.value?.length > 0 &&
-                                            variant.value.map((value) => (
-                                                <div key={value} className="flex items-center mr-1 bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 text-xs font-medium gap-1">
-                                                    <span>{value}</span>
-                                                    <button onClick={() => removeVariantValue(variant.id, value)} type="button" className="cursor-pointer hover:scale-110 text-indigo-500 hover:text-indigo-700">
-                                                        <X size={11} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        <input onKeyDown={(e) => addVariantValue(e, variant.id)} type="text" placeholder="Type a value & press Enter" className="w-full text-sm text-slate-800 placeholder:text-slate-400 outline-none bg-transparent" />
-                                    </div>
-                                </div>
-                                <button type="button" onClick={() => removeVariant(variant.id)} className="cursor-pointer hover:bg-rose-100 hover:text-rose-600 text-slate-400 p-2 rounded-lg duration-200 hover:scale-110 mb-0.5">
-                                    <X size={16} />
-                                </button>
+                    {productType === "simple" ? (
+                        <div className="p-5 rounded-xl border border-dashed border-indigo-200 bg-indigo-50/50 flex items-start gap-3.5">
+                            <div className="p-2 rounded-lg bg-indigo-100 text-indigo-600 shrink-0 mt-0.5">
+                                <Package size={20} />
                             </div>
-                        ))}
+                            <div className="space-y-1">
+                                <h4 className="text-sm font-semibold text-indigo-950">Simple Product (No Variants)</h4>
+                                <p className="text-xs text-slate-600 leading-relaxed">
+                                    This product will be created as a standalone item without color, size, or spec variations.
+                                    You don&apos;t need to define any variant attributes. Barcode, purchase price, retail price, MRP, stock quantity, and optional IMEI tracking will be configured when recording inventory in <strong>New Purchase</strong>.
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {variantCount?.map((variant) => (
+                                <div key={variant.id} className="rounded-xl flex items-end gap-3 p-4 border border-slate-200 bg-slate-50">
+                                    <div className="shrink-0 flex flex-col gap-1">
+                                        <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Name</label>
+                                        <input value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} type="text" placeholder="e.g. Color" className="input border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                                    </div>
+                                    <div className="w-full flex flex-col gap-1">
+                                        <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Values</label>
+                                        <div className="input gap-0 w-full border-slate-300 bg-white flex items-center min-h-10">
+                                            {variant.value?.length > 0 &&
+                                                variant.value.map((value) => (
+                                                    <div key={value} className="flex items-center mr-1 bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 text-xs font-medium gap-1">
+                                                        <span>{value}</span>
+                                                        <button onClick={() => removeVariantValue(variant.id, value)} type="button" className="cursor-pointer hover:scale-110 text-indigo-500 hover:text-indigo-700">
+                                                            <X size={11} />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            <input onKeyDown={(e) => addVariantValue(e, variant.id)} type="text" placeholder="Type a value & press Enter" className="w-full text-sm text-slate-800 placeholder:text-slate-400 outline-none bg-transparent" />
+                                        </div>
+                                    </div>
+                                    <button type="button" onClick={() => removeVariant(variant.id)} className="cursor-pointer hover:bg-rose-100 hover:text-rose-600 text-slate-400 p-2 rounded-lg duration-200 hover:scale-110 mb-0.5">
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            ))}
 
-                        <button type="button" onClick={addNewVariant} className="btn btn-sm border-slate-300 text-slate-600 hover:bg-slate-100 bg-white gap-1.5">
-                            <Plus size={16} /> Add New Variant
-                        </button>
-                    </div>
+                            <button type="button" onClick={addNewVariant} className="btn btn-sm border-slate-300 text-slate-600 hover:bg-slate-100 bg-white gap-1.5">
+                                <Plus size={16} /> Add New Variant
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* Bottom Action Bar */}

@@ -42,6 +42,7 @@ const NewPurchase = () => {
 
     // Variant Attributes fetched from product catalog & generated combinations
     const [variantAttributes, setVariantAttributes] = useState([]);
+    const [isSimpleProduct, setIsSimpleProduct] = useState(false);
     const [loadingVariants, setLoadingVariants] = useState(false);
     const [combinations, setCombinations] = useState([]);
     const removedCombination = useRef([]);
@@ -74,11 +75,12 @@ const NewPurchase = () => {
         return [];
     };
 
-    // Generate cartesian combinations from fetched variant attributes
-    const generateCombinations = (attrs, currentRemoved = removedCombination.current) => {
+    // Generate cartesian combinations from fetched variant attributes (or single row for simple product)
+    const generateCombinations = (attrs, currentRemoved = removedCombination.current, forceSimple = false) => {
         const validAttrs = (attrs || []).filter(attr => getAttributeValues(attr).length > 0);
-        if (validAttrs.length === 0) {
-            setCombinations([]);
+        if (validAttrs.length === 0 || forceSimple) {
+            const defaultCombo = ["Standard"];
+            setCombinations([defaultCombo]);
             return;
         }
 
@@ -111,16 +113,22 @@ const NewPurchase = () => {
         try {
             const { data } = await axios.get(`http://localhost:5000/product/variants/${prod._id}`);
             const attrs = Array.isArray(data?.variantAttributes) ? data.variantAttributes : [];
+            const isSimple = data?.productType === "simple" || (attrs.length === 0 && (!data?.variantTypes || data.variantTypes.length === 0));
+            setIsSimpleProduct(isSimple);
             setVariantAttributes(attrs);
-            generateCombinations(attrs, []);
-            if (attrs.length === 0) {
-                toast("No variant attributes found for this product.", { icon: "ℹ️" });
+
+            if (data?.hasImei !== undefined) {
+                setHasIMEI(Boolean(data.hasImei));
             }
+
+            generateCombinations(attrs, [], isSimple);
+
         } catch (error) {
             console.error("Error fetching product variants:", error);
             toast.error("Failed to fetch product variants");
             setVariantAttributes([]);
             setCombinations([]);
+            setIsSimpleProduct(false);
         } finally {
             setLoadingVariants(false);
         }
@@ -132,10 +140,12 @@ const NewPurchase = () => {
         setVariantAttributes([]);
         setCombinations([]);
         setIMEIs([]);
+        setIsSimpleProduct(false);
         removedCombination.current = [];
     };
 
     const removeCombination = (single) => {
+        if (isSimpleProduct) return;
         removedCombination.current.push(single);
         setCombinations((prev) =>
             prev.filter((combination) => combination.join(",") !== single.join(","))
@@ -147,8 +157,12 @@ const NewPurchase = () => {
             toast.error("Please select a target catalog product first!");
             return;
         }
+        if (isSimpleProduct) {
+            setCombinations([["Standard"]]);
+            return;
+        }
         removedCombination.current = [];
-        generateCombinations(variantAttributes, []);
+        generateCombinations(variantAttributes, [], false);
     };
 
     // IMEI Handlers
@@ -224,6 +238,7 @@ const NewPurchase = () => {
         setCombinations([]);
         setIMEIs([]);
         setHasIMEI(false);
+        setIsSimpleProduct(false);
         removedCombination.current = [];
         setSelectedProduct(null);
         setSearchQuery("");
@@ -260,17 +275,19 @@ const NewPurchase = () => {
         }
         formData.productName = selectedProduct.name;
 
-        const activeVariants = variantAttributes.filter(v => getAttributeValues(v).length > 0);
+        const activeVariants = isSimpleProduct ? [] : variantAttributes.filter(v => getAttributeValues(v).length > 0);
 
         const variants = combinations.map((combination, index) => {
-            const attributes = combination.map((val, i) => ({
-                name: activeVariants[i]?.name || `Option ${i + 1}`,
-                value: val
-            }));
+            const attributes = isSimpleProduct
+                ? []
+                : combination.map((val, i) => ({
+                    name: activeVariants[i]?.name || `Option ${i + 1}`,
+                    value: val
+                }));
 
             const variantObj = {
-                combination,
-                title: combination.join(" / "),
+                combination: isSimpleProduct ? [] : combination,
+                title: isSimpleProduct ? "Standard" : combination.join(" / "),
                 attributes,
                 barcode: formData[`barcode${index + 1}`] || "",
                 purchasePrice: Number(formData[`purchasePrice${index + 1}`]) || 0,
@@ -290,11 +307,12 @@ const NewPurchase = () => {
         });
 
         // Numeric conversions & structure
+        formData.productType = isSimpleProduct ? "simple" : "variable";
         formData.warranty = Number(formData.warranty) || 0;
         formData.shippingCost = Number(formData.shippingCost) || 0;
         formData.extraCost = Number(formData.extraCost) || 0;
-        formData.variantTypes = activeVariants.map(v => v.name);
-        formData.variantAttributes = variantAttributes;
+        formData.variantTypes = isSimpleProduct ? [] : activeVariants.map(v => v.name);
+        formData.variantAttributes = isSimpleProduct ? [] : variantAttributes;
         formData.variants = variants;
         formData.hasImei = formData.hasImei === "on";
 
@@ -484,14 +502,22 @@ const NewPurchase = () => {
                                 <input onChange={(e) => setHasIMEI(e.target.checked)} checked={hasIMEI} type="checkbox" name="hasImei" className="checkbox checkbox-sm" />
                                 <span className="text-xs font-semibold tracking-wide">TRACK IMEI</span>
                             </label>
-                            <button onClick={regenerateCombination} type="button" className="btn btn-sm bg-slate-100 text-slate-600 border border-slate-300 hover:bg-slate-200 group gap-1.5">
-                                <RefreshCw size={15} className="group-hover:rotate-180 duration-300" /> Regenerate
-                            </button>
+                            {!isSimpleProduct && (
+                                <button onClick={regenerateCombination} type="button" className="btn btn-sm bg-slate-100 text-slate-600 border border-slate-300 hover:bg-slate-200 group gap-1.5">
+                                    <RefreshCw size={15} className="group-hover:rotate-180 duration-300" /> Regenerate
+                                </button>
+                            )}
                         </div>
                     </div>
 
                     {/* Variant Attributes badges (if loaded) */}
-                    {variantAttributes.length > 0 && (
+                    {isSimpleProduct ? (
+                        <div className="flex items-center gap-2 pt-1 pb-1">
+                            <span className="badge badge-sm bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold px-2.5 py-1">
+                                Simple Product (Single Stock Item)
+                            </span>
+                        </div>
+                    ) : variantAttributes.length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
                             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Loaded Attributes:</span>
                             {variantAttributes.map((attr, idx) => {
@@ -546,13 +572,19 @@ const NewPurchase = () => {
                                             <tr key={combination.join(",")} className="hover:bg-slate-50 *:px-3 border-b border-slate-100">
                                                 <th className="text-slate-500 font-normal">{index + 1}</th>
                                                 <td className="min-w-40">
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {combination.map((value, i) => (
-                                                            <span key={i} className="badge badge-sm bg-slate-100 text-slate-700 border-slate-200 font-medium">
-                                                                {value}
-                                                            </span>
-                                                        ))}
-                                                    </div>
+                                                    {isSimpleProduct ? (
+                                                        <span className="badge badge-sm bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold">
+                                                            Standard Item
+                                                        </span>
+                                                    ) : (
+                                                        <div className="flex flex-wrap gap-1.5">
+                                                            {combination.map((value, i) => (
+                                                                <span key={i} className="badge badge-sm bg-slate-100 text-slate-700 border-slate-200 font-medium">
+                                                                    {value}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td>
                                                     <input name={`barcode${index + 1}`} type="text" placeholder="Scan or enter barcode" className="input input-sm input-bordered border-slate-300 w-44 text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none" />
@@ -581,9 +613,13 @@ const NewPurchase = () => {
                                                     </td>
                                                 )}
                                                 <td className="text-center">
-                                                    <button onClick={() => removeCombination(combination)} type="button" className="btn btn-ghost btn-xs btn-square text-rose-400 hover:bg-rose-50 hover:text-rose-600">
-                                                        <X size={15} />
-                                                    </button>
+                                                    {isSimpleProduct ? (
+                                                        <span className="text-xs text-slate-400 font-medium">—</span>
+                                                    ) : (
+                                                        <button onClick={() => removeCombination(combination)} type="button" className="btn btn-ghost btn-xs btn-square text-rose-400 hover:bg-rose-50 hover:text-rose-600">
+                                                            <X size={15} />
+                                                        </button>
+                                                    )}
                                                 </td>
                                             </tr>
                                         );

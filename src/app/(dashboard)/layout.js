@@ -1,23 +1,7 @@
 ﻿"use client"
+import { AnimatePresence, motion } from "motion/react";
 import NavLink from '@/Components/NavLink/NavLink';
-import {
-    Boxes,
-    ChevronDown,
-    LayoutDashboard,
-    List,
-    ListPlus,
-    Package,
-    PackagePlus,
-    PanelLeftClose,
-    Plus,
-    PlusCircle,
-    ScanBarcode,
-    ShoppingCart,
-    ShoppingCartPlus,
-    Timeline,
-    TrendingUp,
-    Users
-} from 'lucide-react';
+import { Boxes, ChevronDown, LayoutDashboard, List, ListPlus, Package, PackagePlus, PanelLeftClose, Plus, PlusCircle, ScanBarcode, ShoppingCart, ShoppingCartPlus, Timeline, TrendingUp, Users } from 'lucide-react';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
@@ -168,24 +152,33 @@ const DashboardLayout = ({ children }) => {
                                     </button>
 
                                     {/* Submenu Links */}
-                                    {isOpen && (
-                                        <ul className="ml-4 pl-2 border-l border-base-200 mt-1 space-y-1">
-                                            {link.subLinks.map((sub, subIdx) => {
-                                                const SubIcon = sub.icon;
-                                                return (
-                                                    <li key={subIdx}>
-                                                        <NavLink
-                                                            to={sub.to}
-                                                            className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                                                        >
-                                                            {SubIcon && <SubIcon size={14} className="shrink-0 opacity-70" />}
-                                                            <span>{sub.label}</span>
-                                                        </NavLink>
-                                                    </li>
-                                                );
-                                            })}
-                                        </ul>
-                                    )}
+                                    <AnimatePresence initial={false} >
+
+                                        {isOpen && (
+                                            <motion.ul
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: "auto", opacity: 1 }}
+                                                exit={{ height: 0, opacity: 0 }}
+                                                transition={{ duration: 0.2, ease: "easeInOut" }}
+                                                className="overflow-hidden ml-4 pl-2 border-l border-base-200 mt-1 space-y-1">
+                                                {link.subLinks.map((sub, subIdx) => {
+                                                    const SubIcon = sub.icon;
+                                                    return (
+                                                        <li key={subIdx}>
+                                                            <NavLink
+                                                                to={sub.to}
+                                                                className="flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-medium text-base-content/60 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                                            >
+                                                                {SubIcon && <SubIcon size={14} className="shrink-0 opacity-70" />}
+                                                                <span>{sub.label}</span>
+                                                            </NavLink>
+                                                        </li>
+                                                    );
+                                                })}
+                                            </motion.ul>
+                                        )}
+                                    </AnimatePresence>
+
                                 </li>
                             );
                         }
