@@ -1,7 +1,7 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { ArrowLeft, Check, ChevronDown, Plus, RefreshCw, Save, Scan, Search, ShoppingCart, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Plus, RefreshCw, Save, Scan, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useRef, useState } from 'react';
@@ -40,6 +40,18 @@ const NewPurchase = () => {
     const [purchaseDate, setPurchaseDate] = useState(() => new Date().toLocaleDateString('en-CA'));
     const dropdownRef = useRef(null);
 
+    // Variant Attributes fetched from product catalog & generated combinations
+    const [variantAttributes, setVariantAttributes] = useState([]);
+    const [loadingVariants, setLoadingVariants] = useState(false);
+    const [combinations, setCombinations] = useState([]);
+    const removedCombination = useRef([]);
+
+    // IMEI tracking state
+    const modalRef = useRef();
+    const [hasIMEI, setHasIMEI] = useState(false);
+    const [activeComboModal, setActiveComboModal] = useState("");
+    const [IMEIs, setIMEIs] = useState([]);
+
     // Close dropdown on outside click
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -56,132 +68,71 @@ const NewPurchase = () => {
         prod?.name?.toLowerCase().includes(searchQuery.toLowerCase().trim())
     ) || [];
 
-    // Variants & Combinations State (Moved from Add Product)
-    const [variantCount, setVariantCount] = useState([{ id: crypto.randomUUID(), name: "", value: [] }]);
-    const [combinations, setCombinations] = useState([]);
-    const removedCombination = useRef([]);
-
-    // IMEI tracking state (Moved from Add Product)
-    const modalRef = useRef();
-    const [hasIMEI, setHasIMEI] = useState(false);
-    const [activeComboModal, setActiveComboModal] = useState("");
-    const [IMEIs, setIMEIs] = useState([]);
-
-    const successSwal = () => {
-        Swal.fire({
-            title: "Purchase Recorded Successfully!",
-            text: "Stock and variant inventory have been updated.",
-            icon: "success",
-            showCancelButton: true,
-            confirmButtonText: "View Products",
-            cancelButtonText: "Add Another Purchase",
-            confirmButtonColor: "#4f46e5",
-            cancelButtonColor: "#64748b",
-            reverseButtons: true,
-        }).then((result) => {
-            if (result.isConfirmed) {
-                router.push("/product");
-            }
-        });
+    const getAttributeValues = (attr) => {
+        if (Array.isArray(attr?.values)) return attr.values.filter(Boolean);
+        if (Array.isArray(attr?.value)) return attr.value.filter(Boolean);
+        return [];
     };
 
-    const resetFormPage = (formEl) => {
-        if (formEl?.reset) {
-            formEl.reset();
-        }
-        setVariantCount([{ id: crypto.randomUUID(), name: "", value: [] }]);
-        setCombinations([]);
-        setIMEIs([]);
-        setHasIMEI(false);
-        removedCombination.current = [];
-        setSelectedProduct(null);
-        setSearchQuery("");
-        setIsDropdownOpen(false);
-        setSelectedSupplierId("");
-        setPurchaseDate(new Date().toLocaleDateString('en-CA'));
-    };
-
-    // Variant Handlers
-    const addNewVariant = () => {
-        let tempId;
-        do {
-            tempId = crypto.randomUUID();
-        } while (variantCount.some((variant) => variant.id === tempId));
-
-        setVariantCount(prev => [...prev, { id: tempId, name: "", value: [] }]);
-    };
-
-    const handleVariantName = (id, name) => {
-        setVariantCount(prev => prev.map(variant => variant.id === id ? { ...variant, name } : variant));
-    };
-
-    const removeVariant = (tempId) => {
-        const newVariant = variantCount.filter((variant) => variant.id !== tempId);
-        newCombination(newVariant);
-        setVariantCount(newVariant);
-    };
-
-    const addVariantValue = (e, id) => {
-        if (e.key === "Enter" || e.key === ',') {
-            e.preventDefault();
-            const theInput = e.target.value.trim();
-            if (!theInput) return;
-
-            const currentVariant = variantCount.find(v => v.id === id);
-            const isDuplicate = currentVariant?.value?.some(
-                val => val.toLowerCase() === theInput.toLowerCase()
-            );
-
-            if (isDuplicate) {
-                toast.error(`"${theInput}" has already been added to this variant!`);
-                e.target.value = "";
-                return;
-            }
-
-            const newVariantValue = variantCount.map((value) => {
-                if (value.id === id) {
-                    return { ...value, value: [...(value.value || []), theInput] };
-                }
-                return value;
-            });
-
-            setVariantCount(newVariantValue);
-            e.target.value = "";
-            newCombination(newVariantValue);
-        }
-    };
-
-    const removeVariantValue = (id, value) => {
-        setVariantCount((prev) => {
-            const newVariantValue = prev.map(obj => {
-                if (obj.id === id) {
-                    const tempValue = obj.value.filter((prevValue) => prevValue !== value);
-                    return { ...obj, value: tempValue };
-                }
-                return obj;
-            });
-            newCombination(newVariantValue);
-            return newVariantValue;
-        });
-    };
-
-    const newCombination = (variantValue) => {
-        const allVariantValueArray = variantValue.map(item => item.value).filter(item => item && item.length > 0);
-        if (allVariantValueArray.length === 0) {
+    // Generate cartesian combinations from fetched variant attributes
+    const generateCombinations = (attrs, currentRemoved = removedCombination.current) => {
+        const validAttrs = (attrs || []).filter(attr => getAttributeValues(attr).length > 0);
+        if (validAttrs.length === 0) {
             setCombinations([]);
             return;
         }
 
+        const valueArrays = validAttrs.map(attr => getAttributeValues(attr));
+
         let combination = [[]];
-        for (let singleArrayValue of allVariantValueArray) {
+        for (const singleArrayValue of valueArrays) {
             combination = combination.flatMap(a =>
                 singleArrayValue.map(b => [...a, b])
             );
         }
 
-        const removedCombinationInStr = removedCombination?.current?.map(item => item.join(","));
-        const filteredCombination = combination.filter((item) => !removedCombinationInStr.includes(item.join(",")));
-        setCombinations(filteredCombination);
+        const removedInStr = (currentRemoved || []).map(item => item.join(","));
+        const filtered = combination.filter(item => !removedInStr.includes(item.join(",")));
+        setCombinations(filtered);
+    };
+
+    // Trigger API call when product is selected
+    const handleSelectProduct = async (prod) => {
+        setSelectedProduct(prod);
+        setSearchQuery("");
+        setIsDropdownOpen(false);
+        removedCombination.current = [];
+        setCombinations([]);
+        setIMEIs([]);
+
+        if (!prod?._id) return;
+
+        setLoadingVariants(true);
+        try {
+            const { data } = await axios.get(`http://localhost:5000/product/variants/${prod._id}`);
+            const attrs = Array.isArray(data?.variantAttributes) ? data.variantAttributes : [];
+            setVariantAttributes(attrs);
+            generateCombinations(attrs, []);
+            if (attrs.length === 0) {
+                toast("No variant attributes found for this product.", { icon: "ℹ️" });
+            }
+        } catch (error) {
+            console.error("Error fetching product variants:", error);
+            toast.error("Failed to fetch product variants");
+            setVariantAttributes([]);
+            setCombinations([]);
+        } finally {
+            setLoadingVariants(false);
+        }
+    };
+
+    const handleClearProduct = () => {
+        setSelectedProduct(null);
+        setSearchQuery("");
+        setVariantAttributes([]);
+        setCombinations([]);
+        setIMEIs([]);
+        removedCombination.current = [];
     };
 
     const removeCombination = (single) => {
@@ -192,8 +143,12 @@ const NewPurchase = () => {
     };
 
     const regenerateCombination = () => {
+        if (!selectedProduct) {
+            toast.error("Please select a target catalog product first!");
+            return;
+        }
         removedCombination.current = [];
-        newCombination(variantCount);
+        generateCombinations(variantAttributes, []);
     };
 
     // IMEI Handlers
@@ -243,6 +198,40 @@ const NewPurchase = () => {
 
     const IMEIsToMap = IMEIs.find(obj => obj[activeComboModal])?.[activeComboModal] || [];
 
+    const successSwal = () => {
+        Swal.fire({
+            title: "Purchase Recorded Successfully!",
+            text: "Stock and variant inventory have been updated.",
+            icon: "success",
+            showCancelButton: true,
+            confirmButtonText: "View Products",
+            cancelButtonText: "Add Another Purchase",
+            confirmButtonColor: "#4f46e5",
+            cancelButtonColor: "#64748b",
+            reverseButtons: true,
+        }).then((result) => {
+            if (result.isConfirmed) {
+                router.push("/product");
+            }
+        });
+    };
+
+    const resetFormPage = (formEl) => {
+        if (formEl?.reset) {
+            formEl.reset();
+        }
+        setVariantAttributes([]);
+        setCombinations([]);
+        setIMEIs([]);
+        setHasIMEI(false);
+        removedCombination.current = [];
+        setSelectedProduct(null);
+        setSearchQuery("");
+        setIsDropdownOpen(false);
+        setSelectedSupplierId("");
+        setPurchaseDate(new Date().toLocaleDateString('en-CA'));
+    };
+
     // Form Submission
     const handleSavePurchase = async (e) => {
         e.preventDefault();
@@ -259,13 +248,19 @@ const NewPurchase = () => {
             return;
         }
 
+        if (combinations.length === 0) {
+            toast.error("No variant combinations available to purchase for this product!");
+            return;
+        }
+
         const matchedSupplier = suppliersName?.find(s => s._id === formData.supplierId);
         if (matchedSupplier) {
             formData.supplier = matchedSupplier.name;
             formData.supplierName = matchedSupplier.name;
         }
+        formData.productName = selectedProduct.name;
 
-        const activeVariants = variantCount.filter(v => v.value && v.value.length > 0);
+        const activeVariants = variantAttributes.filter(v => getAttributeValues(v).length > 0);
 
         const variants = combinations.map((combination, index) => {
             const attributes = combination.map((val, i) => ({
@@ -299,6 +294,7 @@ const NewPurchase = () => {
         formData.shippingCost = Number(formData.shippingCost) || 0;
         formData.extraCost = Number(formData.extraCost) || 0;
         formData.variantTypes = activeVariants.map(v => v.name);
+        formData.variantAttributes = variantAttributes;
         formData.variants = variants;
         formData.hasImei = formData.hasImei === "on";
 
@@ -318,13 +314,6 @@ const NewPurchase = () => {
             setSubmitting(false);
         }
     };
-
-
-
-
-
-
-
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -367,12 +356,15 @@ const NewPurchase = () => {
                             <input type="hidden" name="productId" value={selectedProduct?._id || ""} />
 
                             <div className="relative flex items-center">
-                                <input type="text" placeholder="Search existing catalog products..." value={selectedProduct ? selectedProduct.name : searchQuery} onChange={(e) => { setSearchQuery(e.target.value); if (selectedProduct) setSelectedProduct(null); setIsDropdownOpen(true); }} onFocus={() => setIsDropdownOpen(true)} className="input w-full pl-9 pr-16 border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
+                                <input type="text" placeholder="Search existing catalog products..." value={selectedProduct ? selectedProduct.name : searchQuery} onChange={(e) => { setSearchQuery(e.target.value); if (selectedProduct) handleClearProduct(); setIsDropdownOpen(true); }} onFocus={() => setIsDropdownOpen(true)} className="input w-full pl-9 pr-16 border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
                                 <Search size={16} className="absolute left-3 text-slate-400 pointer-events-none" />
 
                                 <div className="absolute right-3 flex items-center gap-1.5">
+                                    {loadingVariants && (
+                                        <span className="loading loading-spinner loading-xs text-indigo-600"></span>
+                                    )}
                                     {selectedProduct && (
-                                        <button type="button" onClick={() => { setSelectedProduct(null); setSearchQuery(""); setIsDropdownOpen(true); }} title="Clear selection" className="text-slate-400 hover:text-rose-500 p-0.5 transition-colors cursor-pointer">
+                                        <button type="button" onClick={handleClearProduct} title="Clear selection" className="text-slate-400 hover:text-rose-500 p-0.5 transition-colors cursor-pointer">
                                             <X size={14} />
                                         </button>
                                     )}
@@ -393,7 +385,7 @@ const NewPurchase = () => {
                                         filteredProducts.map((prod) => {
                                             const isSelected = selectedProduct?._id === prod._id;
                                             return (
-                                                <li key={prod._id} onClick={() => { setSelectedProduct(prod); setSearchQuery(""); setIsDropdownOpen(false); }} className={`px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-indigo-50/60 transition-colors ${isSelected ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-800"}`}>
+                                                <li key={prod._id} onClick={() => handleSelectProduct(prod)} className={`px-4 py-2.5 flex items-center justify-between cursor-pointer hover:bg-indigo-50/60 transition-colors ${isSelected ? "bg-indigo-50 text-indigo-600 font-semibold" : "text-slate-800"}`}>
                                                     <span>{prod.name}</span>
                                                     {isSelected && <Check size={16} className="text-indigo-600" />}
                                                 </li>
@@ -476,56 +468,11 @@ const NewPurchase = () => {
                     </div>
                 </div>
 
-                {/* * ========================================================= */}
-                {/* * SECTION 2: Dynamic Variant Attributes (Color, RAM, Storage) */}
+                {/* Section 2: Variant Pricing & Inventory */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
-                    <div className="pb-4 border-b border-slate-200 flex items-center gap-2.5">
-                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
-                        <div>
-                            <h2 className="text-base font-semibold text-slate-900">Add Variants</h2>
-                            <p className="text-xs text-slate-500 mt-0.5">Define attributes like Color, Storage, or RAM. Values will multiply into individual stock combinations.</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        {variantCount?.map((variant) => (
-                            <div key={variant.id} className="rounded-xl flex items-end gap-3 p-4 border border-slate-200 bg-slate-50">
-                                <div className="shrink-0 flex flex-col gap-1">
-                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Name</label>
-                                    <input value={variant.name || ""} onChange={(e) => handleVariantName(variant.id, e.target.value)} type="text" placeholder="e.g. Color" className="input border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400 text-sm" />
-                                </div>
-                                <div className="w-full flex flex-col gap-1">
-                                    <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Variant Values</label>
-                                    <div className="input gap-0 w-full border-slate-300 bg-white flex items-center  min-h-10">
-                                        {variant.value?.length > 0 &&
-                                            variant.value.map((value) => (
-                                                <div key={value} className="flex items-center mr-1 bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 text-xs font-medium gap-1">
-                                                    <span>{value}</span>
-                                                    <button onClick={() => removeVariantValue(variant.id, value)} type="button" className="cursor-pointer hover:scale-110 text-indigo-500 hover:text-indigo-700">
-                                                        <X size={11} />
-                                                    </button>
-                                                </div>
-                                            ))}
-                                        <input onKeyDown={(e) => addVariantValue(e, variant.id)} type="text" placeholder="Type a value & press Enter" className="w-full text-sm text-slate-800 placeholder:text-slate-400 outline-none bg-transparent" />
-                                    </div>
-                                </div>
-                                <button type="button" onClick={() => removeVariant(variant.id)} className="cursor-pointer hover:bg-rose-100 hover:text-rose-600 text-slate-400 p-2 rounded-lg duration-200 hover:scale-110 mb-0.5">
-                                    <X size={16} />
-                                </button>
-                            </div>
-                        ))}
-
-                        <button type="button" onClick={addNewVariant} className="btn btn-sm border-slate-300 text-slate-600 hover:bg-slate-100 bg-white gap-1.5">
-                            <Plus size={16} /> Add New Variant
-                        </button>
-                    </div>
-                </div>
-
-                {/* Section 3: Variant Pricing & Inventory */}
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-5">
-                    <div className="pb-4 border-b border-slate-200 flex items-center justify-between">
+                    <div className="pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div className="flex items-center gap-2.5">
-                            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">3</span>
+                            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold shrink-0">2</span>
                             <div>
                                 <h2 className="text-base font-semibold text-slate-900">Variant Pricing &amp; Inventory</h2>
                                 <p className="text-xs text-slate-500 mt-0.5">Set purchase cost, retail price, stock quantity, barcode, and IMEI tracking.</p>
@@ -543,7 +490,24 @@ const NewPurchase = () => {
                         </div>
                     </div>
 
-                    <div className="">
+                    {/* Variant Attributes badges (if loaded) */}
+                    {variantAttributes.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Loaded Attributes:</span>
+                            {variantAttributes.map((attr, idx) => {
+                                const vals = getAttributeValues(attr);
+                                if (vals.length === 0) return null;
+                                return (
+                                    <div key={idx} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-100 text-xs text-slate-700">
+                                        <span className="font-semibold text-indigo-700">{attr.name}:</span>
+                                        <span className="text-indigo-900">{vals.join(", ")}</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="overflow-x-auto">
                         <table className="table">
                             <thead>
                                 <tr className="text-xs text-slate-600 uppercase tracking-wide border-b border-slate-200 *:px-3">
@@ -559,10 +523,19 @@ const NewPurchase = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {combinations.length === 0 ? (
+                                {loadingVariants ? (
+                                    <tr>
+                                        <td colSpan={hasIMEI ? 9 : 8} className="text-center py-8 text-slate-500">
+                                            <span className="loading loading-spinner loading-md text-indigo-600"></span>
+                                            <p className="text-xs text-slate-400 mt-2">Fetching variant combinations for {selectedProduct?.name}...</p>
+                                        </td>
+                                    </tr>
+                                ) : combinations.length === 0 ? (
                                     <tr>
                                         <td colSpan={hasIMEI ? 9 : 8} className="text-center py-6 text-xs text-slate-400">
-                                            No combinations generated yet. Add variant values above to create inventory combinations.
+                                            {selectedProduct
+                                                ? "This product has no variant combinations defined in the catalog."
+                                                : "Please select a target catalog product above to load combinations."}
                                         </td>
                                     </tr>
                                 ) : (
