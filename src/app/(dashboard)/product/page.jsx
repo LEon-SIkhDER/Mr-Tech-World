@@ -16,6 +16,7 @@ const Products = () => {
             return Array.isArray(result) ? result : [];
         }
     });
+    
 
     return (
         <div className="space-y-6">
@@ -99,6 +100,7 @@ const Products = () => {
                                                                 alt={product.name || "Product image"}
                                                                 width={48}
                                                                 height={48}
+                                                                unoptimized
                                                                 className="h-full w-full object-cover" />
                                                         ) : (
                                                             <Package size={22} className="text-slate-400 m-auto" />

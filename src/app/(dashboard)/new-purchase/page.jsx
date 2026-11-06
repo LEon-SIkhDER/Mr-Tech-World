@@ -49,6 +49,10 @@ const NewPurchase = () => {
 
     // IMEI tracking state
     const modalRef = useRef();
+    const imei1InputRef = useRef(null);
+    const imei2InputRef = useRef(null);
+    const [imei1Input, setImei1Input] = useState("");
+    const [imei2Input, setImei2Input] = useState("");
     const [hasIMEI, setHasIMEI] = useState(false);
     const [activeComboModal, setActiveComboModal] = useState("");
     const [IMEIs, setIMEIs] = useState([]);
@@ -168,45 +172,103 @@ const NewPurchase = () => {
     // IMEI Handlers
     const openModal = (activeKey) => {
         setActiveComboModal(activeKey.join(","));
+        setImei1Input("");
+        setImei2Input("");
         modalRef.current?.showModal();
+        setTimeout(() => {
+            imei1InputRef.current?.focus();
+        }, 100);
     };
 
-    const handleAddIMEI = (e) => {
-        const value = e.target.value.trim();
-        if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault();
-            if (!value) return;
-
-            const isDuplicate = IMEIs.some(obj => Object.values(obj)[0]?.includes(value));
-            if (isDuplicate) {
-                toast.error(`IMEI "${value}" has already been added!`);
-                return;
-            }
-            e.target.value = "";
-
-            setIMEIs(prev => {
-                const prevIMEI = prev.find(obj => obj[activeComboModal])?.[activeComboModal] || [];
-                if (prev.length > 0) {
-                    const prevObj = prev.find(obj => obj[activeComboModal]);
-                    if (prevObj) {
-                        return prev.map(obj =>
-                            obj[activeComboModal] ? { [activeComboModal]: [...obj[activeComboModal], value] } : obj
-                        );
-                    }
-                    return [...prev, { [activeComboModal]: [...prevIMEI, value] }];
+    // Helper to check if an IMEI already exists across any combination
+    const isImeiAlreadyPresent = (candidate) => {
+        if (!candidate) return false;
+        const lower = candidate.trim().toLowerCase();
+        if (!lower) return false;
+        return IMEIs.some(obj => {
+            const list = Object.values(obj)[0] || [];
+            return list.some(item => {
+                if (typeof item === 'string') {
+                    return item.trim().toLowerCase() === lower;
                 }
-                return [{ [activeComboModal]: [...prevIMEI, value] }];
+                if (item && typeof item === 'object') {
+                    const im1 = (item.imei1 || "").trim().toLowerCase();
+                    const im2 = (item.imei2 || "").trim().toLowerCase();
+                    return im1 === lower || (im2 && im2 === lower);
+                }
+                return false;
             });
-        }
+        });
     };
 
-    const handleRemoveIMEI = (imei) => {
-        const thisIsTheObj = IMEIs.find(obj => obj[activeComboModal]);
-        if (!thisIsTheObj) return;
-        const filteredArray = thisIsTheObj[activeComboModal].filter(value => value !== imei);
+    const handleAddUnit = () => {
+        const val1 = imei1Input.trim();
+        const val2 = imei2Input.trim();
+
+        if (!val1) {
+            toast.error("Please enter or scan IMEI 1");
+            imei1InputRef.current?.focus();
+            return;
+        }
+
+        if (val2 && val1.toLowerCase() === val2.toLowerCase()) {
+            toast.error("IMEI 1 and IMEI 2 cannot be identical!");
+            imei2InputRef.current?.focus();
+            return;
+        }
+
+        if (isImeiAlreadyPresent(val1)) {
+            toast.error(`IMEI 1 "${val1}" has already been added!`);
+            imei1InputRef.current?.focus();
+            return;
+        }
+
+        if (val2 && isImeiAlreadyPresent(val2)) {
+            toast.error(`IMEI 2 "${val2}" has already been added!`);
+            imei2InputRef.current?.focus();
+            return;
+        }
+
+        const newUnit = { imei1: val1, imei2: val2 || "" };
 
         setIMEIs(prev => {
-            return prev.map(obj => obj[activeComboModal] ? { [activeComboModal]: filteredArray } : obj);
+            const prevObj = prev.find(obj => obj[activeComboModal]);
+            if (prevObj) {
+                const list = prevObj[activeComboModal] || [];
+                return prev.map(obj =>
+                    obj[activeComboModal] ? { [activeComboModal]: [...list, newUnit] } : obj
+                );
+            }
+            return [...prev, { [activeComboModal]: [newUnit] }];
+        });
+
+        setImei1Input("");
+        setImei2Input("");
+        setTimeout(() => {
+            imei1InputRef.current?.focus();
+        }, 50);
+    };
+
+    const handleRemoveIMEI = (unitToRemove) => {
+        const targetImei1 = typeof unitToRemove === 'object' ? unitToRemove.imei1 : unitToRemove;
+        setIMEIs(prev => {
+            return prev.map(obj => {
+                if (!obj[activeComboModal]) return obj;
+                const filteredArray = obj[activeComboModal].filter(u => {
+                    const uImei1 = typeof u === 'object' ? u.imei1 : u;
+                    return uImei1 !== targetImei1;
+                });
+                return { [activeComboModal]: filteredArray };
+            });
+        });
+    };
+
+    const handleClearAllIMEIsForCombo = () => {
+        setIMEIs(prev => {
+            return prev.map(obj => {
+                if (!obj[activeComboModal]) return obj;
+                return { [activeComboModal]: [] };
+            });
         });
     };
 
@@ -237,6 +299,8 @@ const NewPurchase = () => {
         setVariantAttributes([]);
         setCombinations([]);
         setIMEIs([]);
+        setImei1Input("");
+        setImei2Input("");
         setHasIMEI(false);
         setIsSimpleProduct(false);
         removedCombination.current = [];
@@ -607,7 +671,7 @@ const NewPurchase = () => {
                                                 </td>
                                                 {hasIMEI && (
                                                     <td>
-                                                        <button onClick={() => openModal(combination)} type="button" className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-none font-medium">
+                                                        <button onClick={() => openModal(combination)} type="button" className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-none font-medium text-sm">
                                                             Add IMEIs
                                                         </button>
                                                     </td>
@@ -643,28 +707,169 @@ const NewPurchase = () => {
 
             {/* IMEI Modal */}
             <dialog ref={modalRef} className="modal z-50">
-                <div className="modal-box bg-white border border-slate-200 shadow-xl text-slate-900">
+                <div className="modal-box max-w-xl bg-white border border-slate-200 shadow-2xl rounded-2xl text-slate-900 p-6">
                     <form method="dialog">
-                        <button className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2 text-slate-500 hover:bg-slate-100">✕</button>
+                        <button className="btn btn-sm btn-circle btn-ghost absolute right-3 top-3 text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
                     </form>
-                    <h3 className="font-bold text-base text-slate-900 mb-4">Add IMEI Serials</h3>
-                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1">Scan or Enter IMEI</label>
-                    <div className="relative">
-                        <input autoFocus type="text" onKeyDown={handleAddIMEI} placeholder="Scan IMEI or paste multiple (Enter to add)..." className="input input-bordered w-full pr-10 font-mono text-sm border-slate-300 focus:border-indigo-400 focus:outline-none text-slate-900 placeholder:text-slate-400" />
-                        <Scan size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+
+                    <div className="flex items-center gap-2.5 mb-1">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                            <Scan size={18} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-base text-slate-900">Add IMEI Serials</h3>
+                            <p className="text-xs text-slate-500">
+                                {activeComboModal ? `Variant: ${activeComboModal.split(',').join(' / ')}` : 'Enter hardware serials for this batch'}
+                            </p>
+                        </div>
                     </div>
-                    <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1 mt-5">
-                        Scanned IMEIs ({IMEIsToMap.length})
-                    </label>
-                    <div className="w-full min-h-28 max-h-96 overflow-y-auto rounded-lg bg-slate-50 border border-slate-200 p-3 flex gap-1.5 flex-wrap items-start">
-                        {IMEIsToMap.map((item) => (
-                            <div key={item} className="bg-white px-2 py-1 rounded-md border border-slate-200 flex items-center gap-1.5 text-xs font-mono text-slate-800">
-                                <span>{item}</span>
-                                <button onClick={() => handleRemoveIMEI(item)} className="cursor-pointer text-slate-400 hover:text-rose-500 transition-colors">
-                                    <X size={13} />
+
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                        {/* 2 Input fields + Add button */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                            <div className="md:col-span-5 space-y-1">
+                                <label className="block text-xs font-semibold text-slate-700">
+                                    IMEI 1 <span className="text-rose-500">*</span>
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        ref={imei1InputRef}
+                                        type="text"
+                                        value={imei1Input}
+                                        onChange={(e) => setImei1Input(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                const val1 = imei1Input.trim();
+                                                if (!val1) {
+                                                    toast.error("Please enter or scan IMEI 1");
+                                                    return;
+                                                }
+                                                if (isImeiAlreadyPresent(val1)) {
+                                                    toast.error(`IMEI 1 "${val1}" has already been added!`);
+                                                    return;
+                                                }
+                                                imei2InputRef.current?.focus();
+                                            }
+                                        }}
+                                        placeholder="Scan / Enter IMEI 1..."
+                                        className="input input-sm h-10 input-bordered w-full pr-8 font-mono text-xs border-slate-300 focus:border-indigo-500 focus:outline-none text-slate-900 placeholder:text-slate-400"
+                                    />
+                                    <Scan size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                </div>
+                            </div>
+
+                            <div className="md:col-span-5 space-y-1">
+                                <label className="block text-xs font-semibold text-slate-700">
+                                    IMEI 2 <span className="text-slate-400 font-normal text-[11px]">(Optional)</span>
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        ref={imei2InputRef}
+                                        type="text"
+                                        value={imei2Input}
+                                        onChange={(e) => setImei2Input(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") {
+                                                e.preventDefault();
+                                                handleAddUnit();
+                                            }
+                                        }}
+                                        placeholder="Scan / Enter IMEI 2..."
+                                        className="input input-sm h-10 input-bordered w-full pr-8 font-mono text-xs border-slate-300 focus:border-indigo-500 focus:outline-none text-slate-900 placeholder:text-slate-400"
+                                    />
+                                    <Scan size={15} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                </div>
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <button
+                                    type="button"
+                                    onClick={handleAddUnit}
+                                    className="btn btn-sm h-10 w-full bg-indigo-600 hover:bg-indigo-700 text-white border-none font-semibold text-xs flex items-center justify-center gap-1 shadow-sm cursor-pointer"
+                                >
+                                    <Plus size={15} /> Add
                                 </button>
                             </div>
-                        ))}
+                        </div>
+
+                        <p className="text-[11px] text-slate-400 mt-1.5">
+                            Tip: After scanning IMEI 1, pressing Enter jumps to IMEI 2. Pressing Enter in IMEI 2 (even if blank) adds the unit.
+                        </p>
+                    </div>
+
+                    {/* Added Units List */}
+                    <div className="flex items-center justify-between mb-2 mt-5">
+                        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                            Added Units ({IMEIsToMap.length})
+                        </label>
+                        {IMEIsToMap.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleClearAllIMEIsForCombo}
+                                className="text-[11px] text-rose-500 hover:text-rose-700 font-medium cursor-pointer"
+                            >
+                                Clear All
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="w-full min-h-32 max-h-72 overflow-y-auto rounded-xl bg-slate-50 border border-slate-200 p-2.5 space-y-2">
+                        {IMEIsToMap.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-8 text-center text-slate-400">
+                                <Scan size={26} className="mb-1 text-slate-300" />
+                                <p className="text-xs font-medium text-slate-500">No units registered yet</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">Scan or type IMEI 1 and optional IMEI 2 above.</p>
+                            </div>
+                        ) : (
+                            IMEIsToMap.map((unit, idx) => {
+                                const im1 = typeof unit === 'object' ? unit.imei1 : unit;
+                                const im2 = typeof unit === 'object' ? unit.imei2 : "";
+                                return (
+                                    <div
+                                        key={`${im1}-${idx}`}
+                                        className="bg-white px-3 py-2 rounded-lg border border-slate-200 flex items-center justify-between text-xs font-mono text-slate-800 shadow-xs hover:border-slate-300 transition-all"
+                                    >
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <span className="font-sans font-bold text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                                                #{idx + 1}
+                                            </span>
+                                            <div>
+                                                <span className="text-[11px] font-sans font-semibold text-slate-500 mr-1.5">IMEI 1:</span>
+                                                <span className="font-bold text-slate-900">{im1}</span>
+                                            </div>
+                                            {im2 ? (
+                                                <div>
+                                                    <span className="text-[11px] font-sans font-semibold text-slate-500 mr-1.5">IMEI 2:</span>
+                                                    <span className="text-slate-700">{im2}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="text-[10px] font-sans text-slate-400 italic">(Single SIM)</span>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRemoveIMEI(unit)}
+                                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                            title="Remove Unit"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+
+                    <div className="modal-action mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-500">
+                            Total Units: <strong className="text-slate-900">{IMEIsToMap.length}</strong>
+                        </span>
+                        <form method="dialog">
+                            <button className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white border-none px-5 rounded-lg text-xs font-semibold cursor-pointer">
+                                Done
+                            </button>
+                        </form>
                     </div>
                 </div>
                 <form method="dialog" className="modal-backdrop">

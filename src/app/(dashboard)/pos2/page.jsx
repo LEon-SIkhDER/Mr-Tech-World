@@ -47,7 +47,7 @@ const SAMPLE_PRODUCTS = [
                 purchasePrice: 135000,
                 retailPrice: 152000,
                 mrp: 155000,
-                quantity: 4,
+                quantity: 1,
                 imeis: ['352948110948271', '352948110948272', '352948110948273', '352948110948274']
             },
             {
@@ -57,7 +57,7 @@ const SAMPLE_PRODUCTS = [
                 purchasePrice: 155000,
                 retailPrice: 174000,
                 mrp: 178000,
-                quantity: 2,
+                quantity: 0,
                 imeis: ['352948110948301', '352948110948302']
             }
         ]
@@ -753,11 +753,28 @@ const PointOfSales = () => {
     };
 
     // Helper functions for IMEI Modal assignment & barcode scanning
+    const getImeiKey = (item) => {
+        if (!item) return '';
+        if (typeof item === 'object') return (item.imei1 || '').trim().toLowerCase();
+        return String(item).trim().toLowerCase();
+    };
+
+    const getImeiDisplayText = (item) => {
+        if (!item) return '';
+        if (typeof item === 'object') {
+            const im1 = item.imei1 || '';
+            const im2 = item.imei2 || '';
+            return im2 ? `${im1} / ${im2}` : im1;
+        }
+        return String(item);
+    };
+
     const handleAssignImei = (imeiToAssign) => {
         if (!imeiModalItem) return;
         const current = [...(imeiModalItem.selectedImeis || [])];
-        if (current.some(i => String(i).toLowerCase() === String(imeiToAssign).toLowerCase())) {
-            alert(`IMEI "${imeiToAssign}" is already assigned.`);
+        const assignKey = getImeiKey(imeiToAssign);
+        if (current.some(i => getImeiKey(i) === assignKey)) {
+            alert(`IMEI "${getImeiDisplayText(imeiToAssign)}" is already assigned.`);
             return;
         }
         if (current.length >= imeiModalItem.quantity) {
@@ -771,7 +788,8 @@ const PointOfSales = () => {
 
     const handleRemoveAssignedImei = (imeiToRemove) => {
         if (!imeiModalItem) return;
-        const updated = (imeiModalItem.selectedImeis || []).filter(i => String(i).toLowerCase() !== String(imeiToRemove).toLowerCase());
+        const removeKey = getImeiKey(imeiToRemove);
+        const updated = (imeiModalItem.selectedImeis || []).filter(i => getImeiKey(i) !== removeKey);
         setCart(prev => prev.map(item => item.itemKey === imeiModalItem.itemKey ? { ...item, selectedImeis: updated } : item));
         setImeiModalItem(prev => ({ ...prev, selectedImeis: updated }));
     };
@@ -782,9 +800,15 @@ const PointOfSales = () => {
         if (!code) return;
 
         const currentSelected = imeiModalItem?.selectedImeis || [];
-        const already = currentSelected.find(i => String(i).toLowerCase() === code.toLowerCase());
+        const already = currentSelected.find(i => {
+            if (typeof i === 'object' && i !== null) {
+                return (i.imei1 && i.imei1.toLowerCase() === code.toLowerCase()) ||
+                       (i.imei2 && i.imei2.toLowerCase() === code.toLowerCase());
+            }
+            return String(i).toLowerCase() === code.toLowerCase();
+        });
         if (already) {
-            alert(`IMEI "${already}" is already assigned to this item.`);
+            alert(`IMEI "${code}" is already assigned to this item.`);
             setModalImeiInput('');
             return;
         }
@@ -796,14 +820,20 @@ const PointOfSales = () => {
         }
 
         const available = Array.isArray(imeiModalItem?.availableImeis) ? imeiModalItem.availableImeis : [];
-        const matched = available.find(i => String(i).toLowerCase() === code.toLowerCase());
+        const matched = available.find(i => {
+            if (typeof i === 'object' && i !== null) {
+                return (i.imei1 && i.imei1.toLowerCase() === code.toLowerCase()) ||
+                       (i.imei2 && i.imei2.toLowerCase() === code.toLowerCase());
+            }
+            return String(i).toLowerCase() === code.toLowerCase();
+        });
 
         if (matched) {
             handleAssignImei(matched);
             setModalImeiInput('');
         } else {
             if (available.length === 0 || window.confirm(`IMEI "${code}" was not found in the registered stock list for this variant. Assign it anyway?`)) {
-                handleAssignImei(code);
+                handleAssignImei({ imei1: code, imei2: "" });
                 setModalImeiInput('');
             }
         }
@@ -857,12 +887,24 @@ const PointOfSales = () => {
                     matchedVariant = v;
                     break;
                 }
-                // Check variant IMEIs
-                v = prod.variants.find(variant => Array.isArray(variant?.imeis) && variant.imeis.some(i => String(i || '').trim().toLowerCase() === code.toLowerCase()));
+                // Check variant IMEIs (supports { imei1, imei2 } or string)
+                v = prod.variants.find(variant => Array.isArray(variant?.imeis) && variant.imeis.some(i => {
+                    if (typeof i === 'object' && i !== null) {
+                        return (i.imei1 && i.imei1.trim().toLowerCase() === code.toLowerCase()) ||
+                               (i.imei2 && i.imei2.trim().toLowerCase() === code.toLowerCase());
+                    }
+                    return String(i || '').trim().toLowerCase() === code.toLowerCase();
+                }));
                 if (v) {
                     matchedProduct = prod;
                     matchedVariant = v;
-                    matchedImei = v.imeis.find(i => String(i || '').trim().toLowerCase() === code.toLowerCase());
+                    matchedImei = v.imeis.find(i => {
+                        if (typeof i === 'object' && i !== null) {
+                            return (i.imei1 && i.imei1.trim().toLowerCase() === code.toLowerCase()) ||
+                                   (i.imei2 && i.imei2.trim().toLowerCase() === code.toLowerCase());
+                        }
+                        return String(i || '').trim().toLowerCase() === code.toLowerCase();
+                    });
                     break;
                 }
             }
@@ -1663,13 +1705,13 @@ const PointOfSales = () => {
                                         </button>
                                     </div>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {imeiModalItem.selectedImeis.map((imei) => (
+                                        {imeiModalItem.selectedImeis.map((imei, idx) => (
                                             <span
-                                                key={imei}
+                                                key={getImeiKey(imei) || idx}
                                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 font-mono text-xs font-semibold"
                                             >
                                                 <Check size={12} className="text-emerald-600" />
-                                                <span>{imei}</span>
+                                                <span>{getImeiDisplayText(imei)}</span>
                                                 <button
                                                     type="button"
                                                     onClick={() => handleRemoveAssignedImei(imei)}
@@ -1691,11 +1733,12 @@ const PointOfSales = () => {
                                 </label>
                                 <div className="max-h-44 overflow-y-auto space-y-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200">
                                     {Array.isArray(imeiModalItem.availableImeis) && imeiModalItem.availableImeis.length > 0 ? (
-                                        imeiModalItem.availableImeis.map((imei) => {
-                                            const isSelected = (imeiModalItem.selectedImeis || []).includes(imei);
+                                        imeiModalItem.availableImeis.map((imei, idx) => {
+                                            const itemKey = getImeiKey(imei) || idx;
+                                            const isSelected = (imeiModalItem.selectedImeis || []).some(s => getImeiKey(s) === getImeiKey(imei));
                                             return (
                                                 <div
-                                                    key={imei}
+                                                    key={itemKey}
                                                     onClick={() => {
                                                         if (isSelected) {
                                                             handleRemoveAssignedImei(imei);
@@ -1710,7 +1753,7 @@ const PointOfSales = () => {
                                                 >
                                                     <div className="flex items-center gap-2">
                                                         <Barcode size={14} className={isSelected ? 'text-white' : 'text-slate-400'} />
-                                                        <span>{imei}</span>
+                                                        <span>{getImeiDisplayText(imei)}</span>
                                                     </div>
                                                     {isSelected ? (
                                                         <span className="badge badge-xs bg-white text-indigo-700 border-none font-bold">Assigned</span>
@@ -1811,7 +1854,7 @@ const PointOfSales = () => {
                                             </div>
                                             {item.selectedImeis?.length > 0 && (
                                                 <div className="font-mono text-[10px] text-indigo-600 mt-0.5">
-                                                    IMEI: {item.selectedImeis.join(', ')}
+                                                    IMEI: {item.selectedImeis.map(i => getImeiDisplayText(i)).join(', ')}
                                                 </div>
                                             )}
                                             {item.warranty > 0 && (
