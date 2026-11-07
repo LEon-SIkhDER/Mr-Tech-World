@@ -1,10 +1,13 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { ArrowRight, Barcode, ChevronLeft, ChevronRight, Layers, Minus, Package, PauseCircle, Phone, Plus, Search, ShoppingCart, Trash, User, UserRound, X } from 'lucide-react';
+import { ArrowRight, Barcode, Check, ChevronLeft, ChevronRight, Layers, Minus, Package, PauseCircle, Phone, Plus, Scan, Search, ShoppingCart, Trash, User, UserRound, X } from 'lucide-react';
 import Link from 'next/link';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Products from './Products';
+import toast from 'react-hot-toast';
+import Image from 'next/image';
+import customizeImageWidth from '@/app/lib/customizeImageWidth';
 
 const limit = 12
 
@@ -58,10 +61,227 @@ const Pos = () => {
     // ? right section ============================================================== 
     // * discount type code 
     const [discountType, setDiscountType] = useState("flat")
-    // * cart related code
+    // * cart related code ===================================================
     const [cart, setCart] = useState([])
     console.log(cart);
 
+    // * IMEI Modal states & auto-focus
+    const [imeiModalItem, setImeiModalItem] = useState(null);
+    const [modalImeiInput, setModalImeiInput] = useState('');
+    const modalImeiInputRef = useRef(null);
+
+    useEffect(() => {
+        if (imeiModalItem) {
+            const timer = setTimeout(() => {
+                modalImeiInputRef.current?.focus();
+            }, 120);
+            return () => clearTimeout(timer);
+        }
+    }, [imeiModalItem]);
+
+    //  handle barcode
+    const handleBarcode = async (e) => {
+        const key = e.key
+        if (key !== "Enter") return
+        const value = e.target.value
+        if (!value) return
+
+        if (key === "Enter") {
+            console.log(value)
+            e.target.value = ""
+            try {
+                const { data } = await axios.get(`http://localhost:5000/product/scan/barcode/${value}`)
+                if (!data || !data.itemKey) {
+                    throw new Error("Product not found")
+                }
+                if (data.maxStock <= 0) {
+                    throw new Error(`"${data.name} is out of stock!"`)
+                }
+
+                let toastMessage = "";
+                let isError = false;
+                setCart((prevCart) => {
+                    const currentCart = Array.isArray(prevCart) ? prevCart : [];
+                    const existingIndex = currentCart.findIndex((item) => item.itemKey === data.itemKey);
+                    if (existingIndex > -1) {
+                        const existingItem = currentCart[existingIndex];
+                        if (existingItem.quantity >= data.maxStock) {
+                            toastMessage = `Cannot add more than ${data.maxStock} units available in stock!`;
+                            isError = true;
+                            return currentCart;
+                        }
+                        const newQty = existingItem.quantity + 1;
+                        const updated = [...currentCart];
+                        updated[existingIndex] = {
+                            ...existingItem,
+                            quantity: newQty,
+                            total: newQty * existingItem.unitPrice
+                        };
+                        // toastMessage = `Updated ${data.name} quantity to ${newQty}`;
+                        return updated;
+                    }
+                    // New item added to cart
+                    // toastMessage = `Added ${data.name} to cart`;
+                    return [data, ...currentCart];
+                });
+                // Trigger toast cleanly outside render
+                setTimeout(() => {
+                    if (toastMessage) {
+                        isError ? toast.error(toastMessage) : toast.success(toastMessage);
+                    }
+                }, 0);
+
+            } catch (error) {
+                toast.error(error.message || "Something went wrong")
+            }
+            // console.log(data)
+        }
+    }
+    // Remove single item from cart
+    const removeItemFromCart = (itemKey) => {
+        setCart((prevCart) => prevCart.filter((item) => item.itemKey !== itemKey));
+    };
+
+    // Cart item quantity increment / decrement (+1 / -1)
+    const updateQuantity = (itemKey, delta) => {
+        let errorMessage = '';
+
+        setCart((prevCart) =>
+            prevCart
+                .map((item) => {
+                    if (item.itemKey !== itemKey) return item;
+
+                    const newQty = item.quantity + delta;
+
+                    // 1. If quantity reaches 0, remove item from cart
+                    if (newQty <= 0) return null;
+
+                    // 2. Prevent exceeding available stock when clicking (+)
+                    if (delta > 0 && newQty > item.maxStock) {
+                        errorMessage = `Cannot add more than ${item.maxStock} units in stock!`;
+                        return item; // Keep current quantity
+                    }
+
+                    // 3. Update quantity, recalculate line total, and sync IMEIs
+                    return {
+                        ...item,
+                        quantity: newQty,
+                        total: newQty * item.unitPrice,
+                        selectedImeis: (item.selectedImeis || []).slice(0, newQty)
+                    };
+                })
+                .filter(Boolean) // Cleans out null items (removed when qty reaches 0)
+        );
+
+        if (errorMessage) {
+            setTimeout(() => toast.error(errorMessage), 0);
+        }
+    };
+
+    // Helper functions for IMEI comparison and formatting
+    const getImeiKey = (item) => {
+        if (!item) return '';
+        if (typeof item === 'object') return (item.imei1 || item.imei || '').trim().toLowerCase();
+        return String(item).trim().toLowerCase();
+    };
+
+    const getImeiDisplayText = (item) => {
+        if (!item) return '';
+        if (typeof item === 'object') {
+            const im1 = item.imei1 || item.imei || '';
+            const im2 = item.imei2 || '';
+            return im2 ? `${im1} / ${im2}` : im1;
+        }
+        return String(item);
+    };
+
+    // Assign IMEI to cart item & sync modal state
+    const handleAssignImei = (imeiToAssign) => {
+        if (!imeiModalItem) return;
+
+        const current = [...(imeiModalItem.selectedImeis || [])];
+        const assignKey = getImeiKey(imeiToAssign);
+
+        if (current.some((i) => getImeiKey(i) === assignKey)) {
+            toast.error(`IMEI "${getImeiDisplayText(imeiToAssign)}" is already assigned!`);
+            return;
+        }
+
+        if (current.length >= imeiModalItem.quantity) {
+            toast.error(`All ${imeiModalItem.quantity} unit(s) are already assigned! Increase cart quantity if selling more.`);
+            return;
+        }
+
+        const updated = [...current, imeiToAssign];
+        setCart((prev) =>
+            prev.map((item) => (item.itemKey === imeiModalItem.itemKey ? { ...item, selectedImeis: updated } : item))
+        );
+        setImeiModalItem((prev) => ({ ...prev, selectedImeis: updated }));
+    };
+
+    // Remove IMEI from cart item & sync modal state
+    const handleRemoveAssignedImei = (imeiToRemove) => {
+        if (!imeiModalItem) return;
+
+        const removeKey = getImeiKey(imeiToRemove);
+        const updated = (imeiModalItem.selectedImeis || []).filter((i) => getImeiKey(i) !== removeKey);
+
+        setCart((prev) =>
+            prev.map((item) => (item.itemKey === imeiModalItem.itemKey ? { ...item, selectedImeis: updated } : item))
+        );
+        setImeiModalItem((prev) => ({ ...prev, selectedImeis: updated }));
+    };
+
+    // Handle scan or manual typing in IMEI modal input
+    const handleModalImeiScan = (e) => {
+        e.preventDefault();
+        const code = modalImeiInput.trim();
+        if (!code) return;
+
+        const available = Array.isArray(imeiModalItem?.availableImeis) ? imeiModalItem.availableImeis : [];
+
+        const matched = available.find((i) => {
+            if (typeof i === 'object' && i !== null) {
+                return (
+                    (i.imei1 && i.imei1.toLowerCase() === code.toLowerCase()) ||
+                    (i.imei2 && i.imei2.toLowerCase() === code.toLowerCase())
+                );
+            }
+            return String(i).toLowerCase() === code.toLowerCase();
+        });
+
+        if (matched) {
+            handleAssignImei(matched);
+        } else {
+            handleAssignImei({ imei1: code, imei2: '' });
+        }
+        setModalImeiInput('');
+    };
+
+    // Toggle individual cart item between Retail Price and MRP
+    const toggleItemPriceType = (itemKey) => {
+        setCart((prev) =>
+            prev.map((item) => {
+                if (item.itemKey !== itemKey) return item;
+                const newType = item.priceType === 'mrp' ? 'retailPrice' : 'mrp';
+                const newUnitPrice = newType === 'mrp'
+                    ? (item.mrp || item.retailPrice || item.unitPrice)
+                    : (item.retailPrice || item.mrp || item.unitPrice);
+                return {
+                    ...item,
+                    priceType: newType,
+                    unitPrice: newUnitPrice,
+                    total: newUnitPrice * item.quantity
+                };
+            })
+        );
+    };
+    // * DISCOUNT RELATED CODE
+    const [discountValue, setDiscountValue] = useState(0)
+
+    const totalPayable = useMemo(() => {
+        return cart.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
+    }, [cart]);
 
 
 
@@ -217,6 +437,7 @@ const Pos = () => {
                                     type="text"
                                     placeholder="Customer name"
                                     className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
+                                    defaultValue={"Walk-In Customer"}
                                 />
                                 <User size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             </div>
@@ -225,40 +446,137 @@ const Pos = () => {
                                     type="text"
                                     placeholder="Phone (e.g. 017...)"
                                     className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
+
                                 />
                                 <Phone size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             </div>
 
-                            <form className="relative col-span-2">
+                            <div className="relative col-span-2">
                                 <input
                                     type="text"
-                                    placeholder="Scan barcode or enter & press Enter to add..."
+                                    placeholder="Scan barcode or IMEI & press Enter to add..."
                                     className="input input-xs h-8 w-full pl-7 pr-7 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
+                                    onKeyDown={handleBarcode}
+
                                 />
                                 <Barcode size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                            </form>
+                            </div>
                         </div>
                     </div>
 
-                    <div className='flex-1'>
+                    <div className='flex-1 space-y-2 p-2'>
                         {
-                            cart &&
-                            cart.map((product, index) => {
+                            cart?.length > 0 ?
+                                cart.map((product, index) => {
+                                    const isImeiMissing = Boolean(product.hasImei) && (product.selectedImeis?.length || 0) < product.quantity;
+                                    return (
+                                        <div key={product.itemKey} className="p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-all space-y-2">
+                                            <div className="flex items-start justify-between gap-2.5">
 
-                                return (
-                                    <div key={product.itemKey}>
-                                        <h1>{product.name}</h1>
+
+                                                <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200/80 overflow-hidden shrink-0 flex items-center justify-center">
+                                                    {product.image ? (
+                                                        <Image src={customizeImageWidth(product.image, 60)} alt={product.name || 'Cart item'} width={40} height={40} unoptimized className="w-full h-full object-cover" />
+                                                    ) : (
+                                                        <Package size={18} className="text-slate-400" />
+                                                    )}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="text-xs font-bold text-slate-900 leading-tight truncate">
+                                                        {product.name}
+                                                    </h4>
+                                                    {product.variantTitle && (
+                                                        <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                                                            {product.variantTitle}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeItemFromCart(product.itemKey)}
+                                                    className="text-slate-300 cursor-pointer hover:text-rose-500 p-0.5 rounded transition-colors shrink-0"
+                                                >
+                                                    <X size={15} />
+                                                </button>
+                                            </div>
+                                            {/* IMEI Assignment row if product is IMEI-tracked */}
+                                            {product.hasImei && (
+                                                <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Scan size={14} className={isImeiMissing ? 'text-amber-500' : 'text-emerald-500'} />
+                                                        <span className="text-[11px] font-medium text-slate-600">
+                                                            IMEIs: <strong className={isImeiMissing ? 'text-amber-600' : 'text-emerald-700'}>{(product.selectedImeis?.length || 0)}/{product.quantity}</strong>
+                                                        </span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setImeiModalItem(product)}
+                                                        className={`btn btn-xs h-6 px-2 text-[10px] rounded border font-semibold ${isImeiMissing
+                                                            ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 animate-pulse'
+                                                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                                            }`}
+                                                    >
+                                                        {isImeiMissing ? 'Assign IMEIs' : 'Edit IMEIs'}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Quantity & Price calculations */}
+                                            <div className="flex items-center justify-between pt-1">
+                                                <div className="flex items-center border border-slate-200 rounded-lg bg-slate-50">
+                                                    <button
+                                                        onClick={() => updateQuantity(product.itemKey, -1)}
+                                                        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 rounded-l-lg transition-colors"
+                                                    >
+                                                        <Minus size={12} />
+                                                    </button>
+                                                    <span className="w-8 text-center text-xs font-bold text-slate-800">
+                                                        {product.quantity}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => updateQuantity(product.itemKey, 1)}
+                                                        className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 rounded-r-lg transition-colors"
+                                                    >
+                                                        <Plus size={12} />
+                                                    </button>
+                                                </div>
+
+                                                <div className="text-right">
+                                                    <div className="flex items-center justify-end gap-1.5">
+                                                        {/* <button
+                                                            type="button"
+                                                            onClick={() => toggleItemPriceType(product.itemKey)}
+                                                            title="Click to toggle between Retail Price and MRP for this item"
+                                                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase transition-all cursor-pointer ${product.priceType === 'mrp' ? 'bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200' : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'}`}
+                                                        >
+                                                            {product.priceType === 'mrp' ? 'MRP' : 'Retail'}
+                                                        </button> */}
+                                                        <span className="text-xs font-bold text-slate-900">
+                                                            ৳{Number(product.total || 0).toLocaleString()}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-400">
+                                                        ৳{Number(product.unitPrice || 0).toLocaleString()} each
+                                                    </div>
+                                                </div>
+                                            </div>
+
+
+                                        </div>
+
+                                    )
+
+                                }) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-center p-6 text-slate-400">
+                                        <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 mb-2">
+                                            <Barcode size={28} />
+                                        </div>
+                                        <p className="text-sm font-semibold text-slate-600">Cart is empty</p>
+                                        <p className="text-xs text-slate-400 mt-1 max-w-50">Click products or scan barcodes on the left to begin</p>
                                     </div>
                                 )
-                            })
+
                         }
-                        <div className="flex flex-col items-center justify-center h-full text-center p-6 text-slate-400">
-                            <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center text-slate-300 mb-2">
-                                <Barcode size={28} />
-                            </div>
-                            <p className="text-sm font-semibold text-slate-600">Cart is empty</p>
-                            <p className="text-xs text-slate-400 mt-1 max-w-50">Click products or scan barcodes on the left to begin</p>
-                        </div>
+
 
                     </div>
 
@@ -294,8 +612,8 @@ const Pos = () => {
                                         type="number"
                                         min="0"
                                         placeholder="0"
-                                        // value={discountValue || ''}
-                                        // onChange={(e) => setDiscountValue(Number(e.target.value) || 0)}
+                                        value={discountValue || ''}
+                                        onChange={(e) => setDiscountValue(Number(e.target.value) || 0)}
                                         className="input input-xs h-7 w-full border border-slate-200 bg-white rounded text-xs text-slate-800 focus:outline-none"
                                     />
                                 </div>
@@ -315,19 +633,19 @@ const Pos = () => {
                                 </div>
                             </div>
 
-                            {/* {discountAmount > 0 && (
+                            {discountValue > 0 && (
                                 <div className="flex justify-between text-emerald-600 font-medium">
                                     <span>Discount Applied</span>
-                                    <span>-৳{discountAmount.toLocaleString()}</span>
+                                    <span>-৳{discountValue.toLocaleString()}</span>
                                 </div>
-                            )} */}
+                            )}
                         </div>
                         {/*  */}
                         <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-3">
                             <div>
                                 <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Payable Amount</span>
                                 <div className="text-xl font-black text-slate-900 tracking-tight">
-                                    ৳ 0
+                                    ৳ {totalPayable || 0}
                                 </div>
                             </div>
 
@@ -360,6 +678,158 @@ const Pos = () => {
                 </div>
             </div>
 
+            {/* DaisyUI IMEI Assignment Modal */}
+            {imeiModalItem && (
+                <dialog className="modal modal-open z-50">
+                    <div className="modal-box bg-white border border-slate-200 shadow-2xl max-w-md p-5 rounded-2xl">
+                        {/* Header */}
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                            <div>
+                                <h3 className="text-base font-bold text-slate-900">Assign IMEI Serials</h3>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {imeiModalItem.name} {imeiModalItem.variantTitle ? `(${imeiModalItem.variantTitle})` : ''}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setImeiModalItem(null)}
+                                className="btn btn-sm btn-circle btn-ghost text-slate-400 hover:text-slate-700"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div className="py-4 space-y-3.5">
+                            {/* Status indicator banner */}
+                            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 p-2.5 rounded-xl">
+                                <div className="text-xs text-slate-600">
+                                    Units in cart: <strong className="text-slate-900">{imeiModalItem.quantity}</strong>
+                                </div>
+                                <div className={`text-xs font-bold px-2.5 py-1 rounded-lg ${(imeiModalItem.selectedImeis?.length || 0) === imeiModalItem.quantity
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                                    }`}>
+                                    {(imeiModalItem.selectedImeis?.length || 0)} / {imeiModalItem.quantity} Assigned
+                                </div>
+                            </div>
+
+                            {/* Barcode / IMEI Scanner input */}
+                            <div>
+                                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1.5">
+                                    Scan IMEI Barcode
+                                </label>
+                                <form onSubmit={handleModalImeiScan} className="relative">
+                                    <input
+                                        ref={modalImeiInputRef} type="text"
+                                        placeholder="Scan barcode or type IMEI & press Enter..."
+                                        value={modalImeiInput} onChange={(e) => setModalImeiInput(e.target.value)}
+                                        className="input input-sm h-10 w-full pl-9 pr-20 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-500 focus:outline-none transition-all"
+                                    />
+                                    <Scan size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <button
+                                        type="submit"
+                                        className="btn btn-xs h-7 absolute right-1.5 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg border-none text-[11px] px-3 font-semibold"
+                                    >
+                                        Assign
+                                    </button>
+                                </form>
+                            </div>
+
+                            {/* Currently Assigned IMEIs */}
+                            {(imeiModalItem.selectedImeis?.length || 0) > 0 && (
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                        <span className="font-semibold text-slate-700">Currently Assigned:</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setCart((prev) => prev.map((item) => item.itemKey === imeiModalItem.itemKey ? { ...item, selectedImeis: [] } : item));
+                                                setImeiModalItem((prev) => ({ ...prev, selectedImeis: [] }));
+                                            }}
+                                            className="text-[10px] text-rose-500 hover:text-rose-700 font-medium"
+                                        >
+                                            Clear All
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {imeiModalItem.selectedImeis.map((imei, idx) => (
+                                            <span
+                                                key={getImeiKey(imei) || idx}
+                                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 font-mono text-xs font-semibold"
+                                            >
+                                                <Check size={12} className="text-emerald-600" />
+                                                <span>{getImeiDisplayText(imei)}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRemoveAssignedImei(imei)}
+                                                    className="text-emerald-500 hover:text-rose-600 cursor-pointer"
+                                                >
+                                                    <X size={13} />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Available Stock Serials to click directly */}
+                            <div className="space-y-1.5">
+                                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                                    Or Click from Stock ({imeiModalItem.availableImeis?.length || 0})
+                                </label>
+                                <div className="max-h-36 overflow-y-auto space-y-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200">
+                                    {imeiModalItem.availableImeis?.length > 0 ? (
+                                        imeiModalItem.availableImeis.map((imei, idx) => {
+                                            const isSelected = (imeiModalItem.selectedImeis || []).some(
+                                                (s) => getImeiKey(s) === getImeiKey(imei)
+                                            );
+                                            return (
+                                                <div
+                                                    key={getImeiKey(imei) || idx}
+                                                    onClick={() => (isSelected ? handleRemoveAssignedImei(imei) : handleAssignImei(imei))}
+                                                    className={`p-2 rounded-lg border text-xs font-mono flex items-center justify-between cursor-pointer transition-all ${isSelected
+                                                        ? 'bg-indigo-600 text-white border-indigo-600 font-bold'
+                                                        : 'bg-white text-slate-800 border-slate-200 hover:border-indigo-300'
+                                                        }`}
+                                                >
+                                                    <div className="flex items-center gap-2">
+                                                        <Barcode size={14} className={isSelected ? 'text-white' : 'text-slate-400'} />
+                                                        <span>{getImeiDisplayText(imei)}</span>
+                                                    </div>
+                                                    <span className="text-[10px]">{isSelected ? 'Assigned ✓' : 'Click to add'}</span>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        <div className="text-center py-4 text-xs text-slate-400">
+                                            No pre-registered IMEIs in stock. Scan or type above.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="modal-action border-t border-slate-200 pt-3 flex items-center justify-between">
+                            <span className="text-xs text-slate-500 font-medium">
+                                {(imeiModalItem.selectedImeis?.length || 0) < imeiModalItem.quantity
+                                    ? `Need ${imeiModalItem.quantity - (imeiModalItem.selectedImeis?.length || 0)} more`
+                                    : '✓ All assigned'}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setImeiModalItem(null)}
+                                className="btn btn-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"
+                            >
+                                Done
+                            </button>
+                        </div>
+                    </div>
+                    <form method="dialog" className="modal-backdrop">
+                        <button type="button" onClick={() => setImeiModalItem(null)}>close</button>
+                    </form>
+                </dialog>
+            )}
         </div>
     );
 };

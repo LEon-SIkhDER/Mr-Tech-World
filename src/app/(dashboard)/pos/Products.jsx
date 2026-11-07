@@ -1,3 +1,4 @@
+import customizeImageWidth from '@/app/lib/customizeImageWidth';
 import { Layers, Minus, Package, Plus, X } from 'lucide-react';
 import Image from 'next/image';
 import React, { useState } from 'react';
@@ -43,7 +44,7 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
                     quantity: newQty,
                     total: newQty * existingItem.unitPrice
                 };
-                toastMessage = `Updated ${product.name} quantity to ${newQty}`;
+                // toastMessage = `Updated ${product.name} quantity to ${newQty}`;
                 return updated;
             }
 
@@ -69,7 +70,7 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
                 warranty: product.warranty || 0
             };
 
-            toastMessage = `Added ${product.name}${variant?.title ? ` (${variant.title})` : ''} to cart`;
+            // toastMessage = `Added ${product.name}${variant?.title ? ` (${variant.title})` : ''} to cart`;
             return [newItem, ...currentCart];
         });
 
@@ -108,6 +109,7 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
             addItemToCart(product, singleVariant);
         }
     };
+    console.log(cart)
 
     return (
         <>
@@ -136,7 +138,7 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
                                 )}
                                 {product.image ? (
                                     <Image
-                                        src={product.image} alt={product.name || 'product'}
+                                        src={customizeImageWidth(product.image, 200)} alt={product.name || 'product'}
                                         width={40} height={40} unoptimized
                                         className="w-full h-full object-contain duration-300 group-hover:scale-105"
                                     />
@@ -177,8 +179,8 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
                                 {selectedProductForModal.image && (
                                     <div className="w-9 h-9 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
                                         <Image
-                                            src={selectedProductForModal.image} alt={selectedProductForModal.name || 'product'}
-                                            width={36} height={36} unoptimized className="object-contain"
+                                            src={customizeImageWidth(selectedProductForModal.image, 46)} alt={selectedProductForModal.name || 'product'}
+                                            width={36} height={36} unoptimized className="object-cover h-full"
                                         />
                                     </div>
                                 )}
