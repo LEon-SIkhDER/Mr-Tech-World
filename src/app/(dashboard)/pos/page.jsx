@@ -451,7 +451,7 @@ const Pos = () => {
             paidAmount: finalPaid,
             dueAmount: finalDue,
             changeDue: finalPaid > totalPayable ? finalPaid - totalPayable : 0,
-            paymentStatus: finalDue === 0 ? 'paid' : finalPaid > 0 ? 'partial' : 'due',
+            paymentStatus: finalDue === 0 ? 'paid' : 'due',
 
             // Return & order lifecycle management
             orderStatus: 'completed', // 'completed' | 'cancelled'

@@ -12,7 +12,7 @@ import Authenticating from '@/Components/Loading/Authenticating';
 const NAV_LINKS = [
     { icon: LayoutDashboard, label: "Overview", to: "/" },
     { icon: ScanBarcode, label: "Point Of Sales", to: "/pos" },
-    { icon: ScanBarcode, label: "Point Of Sales2", to: "/pos2" },
+    // { icon: ScanBarcode, label: "Point Of Sales2", to: "/pos2" },
     {
         icon: Timeline,
         label: "Categories",
