@@ -1,7 +1,7 @@
 'use client'
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { ArrowRight, Barcode, Check, ChevronLeft, ChevronRight, Layers, Minus, Package, PauseCircle, Phone, Plus, Scan, Search, ShoppingCart, Trash, User, UserRound, X } from 'lucide-react';
+import { ArrowRight, BangladeshiTaka, Barcode, Check, ChevronLeft, ChevronRight, Layers, Minus, Package, PauseCircle, Phone, Plus, Scan, Search, ShoppingCart, Trash, User, UserRound, X } from 'lucide-react';
 import Link from 'next/link';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Products from './Products';
@@ -92,8 +92,6 @@ const Pos = () => {
         if (!value) return
 
         if (key === "Enter") {
-            console.log(value)
-            e.target.value = ""
             try {
                 const { data } = await axios.get(`http://localhost:5000/product/scan/barcode/${value}`)
                 if (!data || !data.itemKey) {
@@ -102,6 +100,7 @@ const Pos = () => {
                 if (data.maxStock <= 0) {
                     throw new Error(`"${data.name} is out of stock!"`)
                 }
+                e.target.value = ""
 
                 let toastMessage = "";
                 let isError = false;
@@ -138,6 +137,7 @@ const Pos = () => {
 
             } catch (error) {
                 toast.error(error.message || "Something went wrong")
+                e.target.select?.()
             }
             // console.log(data)
         }
@@ -202,19 +202,19 @@ const Pos = () => {
 
     // Assign IMEI to cart item & sync modal state
     const handleAssignImei = (imeiToAssign) => {
-        if (!imeiModalItem) return;
+        if (!imeiModalItem) return false;
 
         const current = [...(imeiModalItem.selectedImeis || [])];
         const assignKey = getImeiKey(imeiToAssign);
 
         if (current.some((i) => getImeiKey(i) === assignKey)) {
             toast.error(`IMEI "${getImeiDisplayText(imeiToAssign)}" is already assigned!`);
-            return;
+            return false;
         }
 
         if (current.length >= imeiModalItem.quantity) {
             toast.error(`All ${imeiModalItem.quantity} unit(s) are already assigned! Increase cart quantity if selling more.`);
-            return;
+            return false;
         }
 
         const updated = [...current, imeiToAssign];
@@ -222,6 +222,7 @@ const Pos = () => {
             prev.map((item) => (item.itemKey === imeiModalItem.itemKey ? { ...item, selectedImeis: updated } : item))
         );
         setImeiModalItem((prev) => ({ ...prev, selectedImeis: updated }));
+        return true;
     };
 
     // Remove IMEI from cart item & sync modal state
@@ -256,11 +257,16 @@ const Pos = () => {
         });
 
         if (matched) {
-            handleAssignImei(matched);
+            const assigned = handleAssignImei(matched);
+            if (assigned) {
+                setModalImeiInput('');
+            } else {
+                modalImeiInputRef.current?.select();
+            }
         } else {
-            handleAssignImei({ imei1: code, imei2: '' });
+            toast.error(`IMEI "${code}" does not exist in stock for this product!`);
+            modalImeiInputRef.current?.select();
         }
-        setModalImeiInput('');
     };
 
     // Toggle individual cart item between Retail Price and MRP
@@ -727,12 +733,12 @@ const Pos = () => {
                                                         >
                                                             {product.priceType === 'mrp' ? 'MRP' : 'Retail'}
                                                         </button> */}
-                                                        <span className="text-xs font-bold text-slate-900">
-                                                            ৳{Number(product.total || 0).toLocaleString()}
+                                                        <span className="text-xs font-bold text-slate-900 inline-flex items-center">
+                                                            <BangladeshiTaka size={13} className="shrink-0" />{Number(product.total || 0).toLocaleString()}
                                                         </span>
                                                     </div>
-                                                    <div className="text-[10px] text-slate-400">
-                                                        ৳{Number(product.unitPrice || 0).toLocaleString()} each
+                                                    <div className="text-[10px] text-slate-400 flex items-center justify-end">
+                                                        <BangladeshiTaka size={10} className="shrink-0" />{Number(product.unitPrice || 0).toLocaleString()} each
                                                     </div>
                                                 </div>
                                             </div>
@@ -762,7 +768,7 @@ const Pos = () => {
                         <div className="space-y-1 text-xs text-slate-600">
                             <div className="flex justify-between">
                                 <span>Subtotal ({totalCartItems} items)</span>
-                                <span className="font-semibold text-slate-800">৳{subtotal.toLocaleString()}</span>
+                                <span className="font-semibold text-slate-800 inline-flex items-center"><BangladeshiTaka size={13} className="shrink-0" />{subtotal.toLocaleString()}</span>
                             </div>
 
                             {/* Discount & Delivery row */}
@@ -779,7 +785,7 @@ const Pos = () => {
                                                 }}
                                                 className={`px-1.5 py-0.5 rounded ${discountType === 'flat' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}
                                             >
-                                                ৳
+                                                <BangladeshiTaka size={11} />
                                             </button>
                                             <button
                                                 type="button"
@@ -807,7 +813,14 @@ const Pos = () => {
                             {discountAmount > 0 && (
                                 <div className="flex justify-between text-emerald-600 font-medium">
                                     <span>Discount Applied {discountType === 'percent' && `(${discountValue}%)`}</span>
-                                    <span>-৳{discountAmount.toLocaleString()}</span>
+                                    <span className="inline-flex items-center">-<BangladeshiTaka size={13} className="shrink-0" />{discountAmount.toLocaleString()}</span>
+                                </div>
+                            )}
+
+                            {Number(deliveryFee) > 0 && (
+                                <div className="flex justify-between text-indigo-600 font-medium">
+                                    <span>Delivery / Courier Fee</span>
+                                    <span className="inline-flex items-center">+<BangladeshiTaka size={13} className="shrink-0" />{Number(deliveryFee).toLocaleString()}</span>
                                 </div>
                             )}
                         </div>
@@ -815,8 +828,8 @@ const Pos = () => {
                         <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-3">
                             <div>
                                 <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Payable Amount</span>
-                                <div className="text-xl font-black text-slate-900 tracking-tight">
-                                    ৳ {totalPayable.toLocaleString()}
+                                <div className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-0.5">
+                                    <BangladeshiTaka size={20} className="shrink-0" /><span>{totalPayable.toLocaleString()}</span>
                                 </div>
                             </div>
                             <div>
@@ -834,7 +847,7 @@ const Pos = () => {
                         {/*  */}
                         <div className="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
                             <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs text-slate-600 font-medium">Received (৳):</span>
+                                <span className="text-xs text-slate-600 font-medium inline-flex items-center gap-0.5">Received (<BangladeshiTaka size={11} className="shrink-0" />):</span>
                                 <input type="number" min="0" step="any" placeholder={totalPayable ? `${totalPayable.toLocaleString()}` : "0.00"} value={paidAmount} onChange={handlePaidAmount} onFocus={(e) => e.target.select()} className="input input-xs h-7 w-28 border border-slate-300 text-right font-bold text-slate-900 text-xs focus:border-indigo-500 focus:outline-none rounded-lg" />
                             </div>
 
@@ -842,7 +855,7 @@ const Pos = () => {
                             {dueAmount > 0 && (
                                 <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 text-xs">
                                     <span className="font-bold text-amber-700">Due Amount :</span>
-                                    <span className="font-black text-rose-600 text-sm">৳{dueAmount.toLocaleString()}</span>
+                                    <span className="font-black text-rose-600 text-sm inline-flex items-center"><BangladeshiTaka size={15} className="shrink-0" />{dueAmount.toLocaleString()}</span>
                                 </div>
                             )}
 
@@ -850,7 +863,7 @@ const Pos = () => {
                             {Number(paidAmount) > totalPayable && (
                                 <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 text-xs">
                                     <span className="font-semibold text-slate-600">Change Return :</span>
-                                    <span className="font-bold text-emerald-600 text-sm">৳{changeDue.toLocaleString()}</span>
+                                    <span className="font-bold text-emerald-600 text-sm inline-flex items-center"><BangladeshiTaka size={15} className="shrink-0" />{changeDue.toLocaleString()}</span>
                                 </div>
                             )}
 

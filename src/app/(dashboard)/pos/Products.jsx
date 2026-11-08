@@ -1,5 +1,5 @@
 import customizeImageWidth from '@/app/lib/customizeImageWidth';
-import { Layers, Minus, Package, Plus, X } from 'lucide-react';
+import { BangladeshiTaka, Layers, Minus, Package, Plus, X } from 'lucide-react';
 import Image from 'next/image';
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
@@ -155,7 +155,7 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
                             <div className="border-t border-t-slate-200 my-2"></div>
                             <div className="flex justify-between items-end">
                                 <div>
-                                    <span className="text-xs font-extrabold text-slate-900">৳{Number(price || 0).toLocaleString()}</span>
+                                    <span className="text-xs font-extrabold text-slate-900 inline-flex items-center"><BangladeshiTaka size={13} className="shrink-0" />{Number(price || 0).toLocaleString()}</span>
                                     <h6 className={`text-[10px] font-medium ${totalStock > 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
                                         {totalStock > 0 ? `${totalStock} In Stock` : "Out Of Stock"}
                                     </h6>
@@ -242,8 +242,8 @@ const Products = ({ products, priceType = 'mrp', cart = [], setCart }) => {
 
                                         <div className="flex items-center gap-2.5">
                                             <div className="text-right">
-                                                <span className="text-xs font-extrabold text-slate-900">
-                                                    ৳{Number(activePrice || 0).toLocaleString()}
+                                                <span className="text-xs font-extrabold text-slate-900 inline-flex items-center">
+                                                    <BangladeshiTaka size={13} className="shrink-0" />{Number(activePrice || 0).toLocaleString()}
                                                 </span>
                                                 <div className="text-[9px] text-slate-400 uppercase font-semibold">
                                                     {currentPriceType === 'retailPrice' ? 'Retail' : 'MRP'}
