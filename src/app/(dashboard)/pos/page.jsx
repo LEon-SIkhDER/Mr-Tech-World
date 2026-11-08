@@ -59,6 +59,11 @@ const Pos = () => {
     console.log(priceType)
 
     // ? right section ============================================================== 
+    // * customer details
+    const [customerName, setCustomerName] = useState("Walk-In Customer");
+    const [customerPhone, setCustomerPhone] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
     // * discount type code 
     const [discountType, setDiscountType] = useState("flat")
     // * cart related code ===================================================
@@ -276,12 +281,200 @@ const Pos = () => {
             })
         );
     };
-    // * DISCOUNT RELATED CODE
-    const [discountValue, setDiscountValue] = useState(0)
+    // * DISCOUNT & TOTALS RELATED CODE
+    const [discountValue, setDiscountValue] = useState(0);
+    const [deliveryFee, setDeliveryFee] = useState(0);
 
-    const totalPayable = useMemo(() => {
+    const subtotal = useMemo(() => {
         return cart.reduce((acc, item) => acc + (Number(item.total) || 0), 0);
     }, [cart]);
+
+    const totalCartItems = useMemo(() => {
+        return cart.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+    }, [cart]);
+
+    // Calculate discount amount based on flat (৳) or percent (%)
+    const discountAmount = useMemo(() => {
+        if (!discountValue || discountValue <= 0) return 0;
+        if (discountType === 'percent') {
+            const pct = Math.min(100, Number(discountValue));
+            return (subtotal * pct) / 100;
+        }
+        return Math.min(Number(discountValue), subtotal);
+    }, [subtotal, discountType, discountValue]);
+
+    // Handle discount typing & validation
+    const handleDiscount = (e) => {
+        const raw = e.target.value;
+        if (raw === '') {
+            setDiscountValue(0);
+            return;
+        }
+        const val = Number(raw) || 0;
+        if (val < 0) {
+            setDiscountValue(0);
+            return;
+        }
+        const maxLimit = discountType === 'percent' ? 100 : subtotal;
+
+        if (val > maxLimit) {
+            toast.error(discountType === 'percent' ? 'Discount cannot exceed 100%!' : 'Discount cannot exceed subtotal!');
+            setDiscountValue(raw.slice(0, -1) ? Number(raw.slice(0, -1)) : 0);
+        } else {
+            setDiscountValue(val);
+        }
+    };
+
+    const handleDeliveryFee = (e) => {
+        const val = Number(e.target.value) || 0;
+        if (val < 0) {
+            setDeliveryFee(0);
+            return;
+        }
+        setDeliveryFee(val);
+    };
+
+    const totalPayable = useMemo(() => {
+        const total = subtotal - discountAmount + Number(deliveryFee || 0);
+        return Math.max(0, Math.round(total));
+    }, [subtotal, discountAmount, deliveryFee]);
+
+    // * Payment, Received & Due calculations
+    const [paymentMethod, setPaymentMethod] = useState('Cash');
+    const [paidAmount, setPaidAmount] = useState('');
+
+    const handlePaidAmount = (e) => {
+        const raw = e.target.value;
+        if (raw === '') {
+            setPaidAmount('');
+            return;
+        }
+        const num = Number(raw) || 0;
+        if (num < 0) {
+            setPaidAmount('');
+            return;
+        }
+        if (num > totalPayable) {
+            toast.error("Received amount cannot exceed total payable!");
+            setPaidAmount(raw.slice(0, -1));
+            return;
+        }
+        setPaidAmount(raw);
+    };
+
+    // When customer pays less than totalPayable -> Due (বাকি)
+    const dueAmount = useMemo(() => {
+        if (paidAmount === '' || paidAmount === null) return 0;
+        const tendered = Number(paidAmount);
+        if (isNaN(tendered) || tendered >= totalPayable) return 0;
+        return Math.max(0, totalPayable - tendered);
+    }, [paidAmount, totalPayable]);
+
+    // When customer pays extra cash -> Change Due (ফেরত)
+    const changeDue = useMemo(() => {
+        const tendered = Number(paidAmount) || 0;
+        if (tendered <= totalPayable) return 0;
+        return tendered - totalPayable;
+    }, [paidAmount, totalPayable]);
+
+    // * Complete Sale Handler (Pre-sale validation & data assembly)
+    const handleCompleteSale = async () => {
+        if (!cart || cart.length === 0) {
+            toast.error("Cart is empty! Add products to proceed.");
+            return;
+        }
+
+        const unassignedImeiItem = cart.find(
+            (item) => Boolean(item.hasImei) && (item.selectedImeis?.length || 0) < item.quantity
+        );
+        if (unassignedImeiItem) {
+            toast.error(`Please assign all IMEIs for "${unassignedImeiItem.name}" before completing the sale!`);
+            setImeiModalItem(unassignedImeiItem);
+            return;
+        }
+
+        const finalPaid = paidAmount === '' ? totalPayable : Number(paidAmount);
+        const finalDue = Math.max(0, totalPayable - finalPaid);
+
+        // Standardized enterprise Sale Payload with full return & warranty tracking support
+        const saleData = {
+            customer: {
+                name: customerName.trim() || 'Walk-In Customer',
+                phone: customerPhone.trim() || ''
+            },
+            items: cart.map((item) => {
+                const itemImeis = (item.selectedImeis || []).map((i) => {
+                    if (typeof i === 'object' && i !== null) {
+                        return {
+                            imei1: (i.imei1 || i.imei || '').trim(),
+                            imei2: (i.imei2 || '').trim()
+                        };
+                    }
+                    return { imei1: String(i).trim(), imei2: '' };
+                }).filter((i) => Boolean(i.imei1));
+
+                return {
+                    productId: item.productId,
+                    name: item.name,
+                    brand: item.brand || '',
+                    model: item.model || '',
+                    image: item.image || '',
+                    variantTitle: item.variantTitle || '',
+                    barcode: item.barcode || '',
+                    priceType: item.priceType || priceType,
+                    unitPrice: Number(item.unitPrice) || 0,
+                    quantity: Number(item.quantity) || 1,
+                    total: Number(item.total) || 0,
+                    warranty: Number(item.warranty) || 0,
+                    hasImei: Boolean(item.hasImei),
+                    imeis: itemImeis,
+                    // Return & warranty lifecycle fields
+                    returnedQuantity: 0,
+                    returnedImeis: [],
+                    returnStatus: 'none' // 'none' | 'partial' | 'fully_returned'
+                };
+            }),
+            totalCartItems,
+            subtotal,
+            discountType,
+            discountValue: Number(discountValue) || 0,
+            discountAmount,
+            deliveryFee: Number(deliveryFee) || 0,
+            totalPayable,
+            paymentMethod,
+            paidAmount: finalPaid,
+            dueAmount: finalDue,
+            changeDue: finalPaid > totalPayable ? finalPaid - totalPayable : 0,
+            paymentStatus: finalDue === 0 ? 'paid' : finalPaid > 0 ? 'partial' : 'due',
+
+            // Return & order lifecycle management
+            orderStatus: 'completed', // 'completed' | 'cancelled'
+            returnStatus: 'none',    // 'none' | 'partial' | 'fully_returned'
+            refundAmount: 0,         // Accumulated refund amount if items are returned
+            returns: [],             // Audit trail of returns [{ returnId, returnDate, items, refundAmount, reason }]
+
+            saleDate: new Date().toISOString()
+        };
+        const toastId = toast.loading("Processing sale and updating inventory...");
+        setIsSubmitting(true);
+        try {
+            const { data } = await axios.post("http://localhost:5000/sale", saleData);
+            toast.success(`Sale completed! Invoice: ${data.invoiceNo || ''}`, { id: toastId });
+            // Reset POS for next customer
+            setCart([]);
+            setPaidAmount('');
+            setDiscountValue(0);
+            setDeliveryFee(0);
+            setCustomerName("Walk-In Customer");
+            setCustomerPhone("");
+            // (Optional: Open Invoice/Print Modal here)
+        } catch (error) {
+            console.error("Sale error:", error);
+            toast.error(error.response?.data?.message || error.message || "Failed to complete sale", { id: toastId });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
 
 
 
@@ -405,7 +598,7 @@ const Pos = () => {
                                     <ShoppingCart size={18} className="text-indigo-600" />
                                     <h2 className="text-base font-bold text-slate-900">Current Sale</h2>
                                 </div>
-                                <span suppressHydrationWarning className="text-[11px] font-mono text-slate-400">IN-10430</span>
+                                <span className="text-[11px] font-mono text-slate-400">New Sale</span>
                             </div>
                             <div className='flex gap-5 items-center'>
                                 <div className="flex items-center bg-slate-200/90 p-0.5 rounded-lg border border-slate-300/70 text-[11px]">
@@ -433,32 +626,16 @@ const Pos = () => {
 
                         <div className="grid grid-cols-2 gap-2 mt-2">
                             <div className="relative">
-                                <input
-                                    type="text"
-                                    placeholder="Customer name"
-                                    className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
-                                    defaultValue={"Walk-In Customer"}
-                                />
+                                <input type="text" placeholder="Customer name" value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none" />
                                 <User size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             </div>
                             <div className="relative">
-                                <input
-                                    type="text"
-                                    placeholder="Phone (e.g. 017...)"
-                                    className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
-
-                                />
+                                <input type="text" placeholder="Phone (e.g. 017...)" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} className="input input-xs h-8 w-full pl-7 pr-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none" />
                                 <Phone size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             </div>
 
                             <div className="relative col-span-2">
-                                <input
-                                    type="text"
-                                    placeholder="Scan barcode or IMEI & press Enter to add..."
-                                    className="input input-xs h-8 w-full pl-7 pr-7 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none"
-                                    onKeyDown={handleBarcode}
-
-                                />
+                                <input type="text" placeholder="Scan barcode or IMEI & press Enter to add..." onKeyDown={handleBarcode} className="input input-xs h-8 w-full pl-7 pr-7 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none" />
                                 <Barcode size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                             </div>
                         </div>
@@ -584,8 +761,8 @@ const Pos = () => {
                         {/* Breakdown */}
                         <div className="space-y-1 text-xs text-slate-600">
                             <div className="flex justify-between">
-                                <span>Subtotal (0 items)</span>
-                                <span className="font-semibold text-slate-800">৳{0}</span>
+                                <span>Subtotal ({totalCartItems} items)</span>
+                                <span className="font-semibold text-slate-800">৳{subtotal.toLocaleString()}</span>
                             </div>
 
                             {/* Discount & Delivery row */}
@@ -595,48 +772,42 @@ const Pos = () => {
                                         <span>Discount</span>
                                         <div className="flex gap-1 text-[10px] font-bold">
                                             <button
-                                                onClick={() => setDiscountType('flat')}
+                                                type="button"
+                                                onClick={() => {
+                                                    setDiscountType('flat');
+                                                    if (discountValue > subtotal) setDiscountValue(subtotal);
+                                                }}
                                                 className={`px-1.5 py-0.5 rounded ${discountType === 'flat' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}
                                             >
                                                 ৳
                                             </button>
                                             <button
-                                                onClick={() => setDiscountType('percent')}
+                                                type="button"
+                                                onClick={() => {
+                                                    setDiscountType('percent');
+                                                    if (discountValue > 100) setDiscountValue(100);
+                                                }}
                                                 className={`px-1.5 py-0.5 rounded ${discountType === 'percent' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}
                                             >
                                                 %
                                             </button>
                                         </div>
                                     </div>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        placeholder="0"
-                                        value={discountValue || ''}
-                                        onChange={(e) => setDiscountValue(Number(e.target.value) || 0)}
-                                        className="input input-xs h-7 w-full border border-slate-200 bg-white rounded text-xs text-slate-800 focus:outline-none"
-                                    />
+                                    <input type="number" min="0" placeholder="0" value={discountValue || ''} onChange={handleDiscount} className="input input-xs h-7 w-full border border-slate-200 bg-white rounded text-xs text-slate-800 focus:outline-none" />
                                 </div>
 
                                 <div>
                                     <div className="flex items-center justify-between text-[11px] mb-1">
                                         <span>Delivery / Courier</span>
                                     </div>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        placeholder="0"
-                                        // value={deliveryFee || ''}
-                                        // onChange={(e) => setDeliveryFee(Number(e.target.value) || 0)}
-                                        className="input input-xs h-7 w-full border border-slate-200 bg-white rounded text-xs text-slate-800 focus:outline-none"
-                                    />
+                                    <input type="number" min="0" placeholder="0" value={deliveryFee || ''} onChange={handleDeliveryFee} className="input input-xs h-7 w-full border border-slate-200 bg-white rounded text-xs text-slate-800 focus:outline-none" />
                                 </div>
                             </div>
 
-                            {discountValue > 0 && (
+                            {discountAmount > 0 && (
                                 <div className="flex justify-between text-emerald-600 font-medium">
-                                    <span>Discount Applied</span>
-                                    <span>-৳{discountValue.toLocaleString()}</span>
+                                    <span>Discount Applied {discountType === 'percent' && `(${discountValue}%)`}</span>
+                                    <span>-৳{discountAmount.toLocaleString()}</span>
                                 </div>
                             )}
                         </div>
@@ -645,33 +816,56 @@ const Pos = () => {
                             <div>
                                 <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Payable Amount</span>
                                 <div className="text-xl font-black text-slate-900 tracking-tight">
-                                    ৳ {totalPayable || 0}
+                                    ৳ {totalPayable.toLocaleString()}
                                 </div>
                             </div>
+                            <div>
 
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 block">Payment method</span>
 
-                            <select className="select select-xs w-32 h-8 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none">
-                                {['Cash', 'bKash', 'Nagad', 'Card', "Others"].map(method => (
-                                    <option key={method} value={method}>{method}</option>
-                                ))}
-                            </select>
+                                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="select select-xs w-32 h-8 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none">
+                                    {['Cash', 'bKash', 'Nagad', 'Card', "Others"].map(method => (
+                                        <option key={method} value={method}>{method}</option>
+                                    ))}
+                                </select>
+                            </div>
 
                         </div>
                         {/*  */}
-                        <div className="bg-white p-2 rounded-xl border border-slate-200 space-y-1.5">
+                        <div className="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1.5">
                             <div className="flex items-center justify-between gap-2">
                                 <span className="text-xs text-slate-600 font-medium">Received (৳):</span>
-                                <input
-                                    type="number"
-                                    placeholder="0.00"
-                                    // value={paidAmount}
-                                    // onChange={(e) => setPaidAmount(e.target.value)}
-                                    className="input input-xs h-7 w-28 border border-slate-300 text-right font-bold text-slate-900 text-xs focus:border-indigo-500 focus:outline-none rounded-lg"
-                                />
+                                <input type="number" min="0" step="any" placeholder={totalPayable ? `${totalPayable.toLocaleString()}` : "0.00"} value={paidAmount} onChange={handlePaidAmount} onFocus={(e) => e.target.select()} className="input input-xs h-7 w-28 border border-slate-300 text-right font-bold text-slate-900 text-xs focus:border-indigo-500 focus:outline-none rounded-lg" />
                             </div>
+
+                            {/* Due Amount Banner */}
+                            {dueAmount > 0 && (
+                                <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 text-xs">
+                                    <span className="font-bold text-amber-700">Due Amount :</span>
+                                    <span className="font-black text-rose-600 text-sm">৳{dueAmount.toLocaleString()}</span>
+                                </div>
+                            )}
+
+                            {/* Change Return Banner (if customer overpaid) */}
+                            {Number(paidAmount) > totalPayable && (
+                                <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 text-xs">
+                                    <span className="font-semibold text-slate-600">Change Return :</span>
+                                    <span className="font-bold text-emerald-600 text-sm">৳{changeDue.toLocaleString()}</span>
+                                </div>
+                            )}
+
+                            {/* Paid in Full Badge */}
+                            {/* {(paidAmount === '' || Number(paidAmount) === totalPayable) && totalPayable > 0 && (
+                                <div className="flex justify-between items-center pt-1.5 border-t border-slate-100 text-xs">
+                                    <span className="text-slate-500 font-medium">Status:</span>
+                                    <span className="font-bold text-emerald-600 text-[11px] bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                        ✓ Paid in Full
+                                    </span>
+                                </div>
+                            )} */}
                         </div>
                         {/*  */}
-                        <button className='btn btn-primary rounded-xl w-full '>Complete sale <ArrowRight className='mt-1' size={18} /></button>
+                        <button type="button" disabled={isSubmitting || cart.length === 0} onClick={handleCompleteSale} className='btn btn-primary rounded-xl w-full'>{isSubmitting ? 'Processing...' : 'Complete sale'} <ArrowRight className='mt-1' size={18} /></button>
 
                     </div>
 
